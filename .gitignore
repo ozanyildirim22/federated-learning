@@ -1,5 +1,10 @@
 __pycache__/
-data/
 fed_env/
 *.pdf
 pdf_text.txt
+*.tar.gz
+data/cifar/cifar-10-batches-py/
+pickles/
+*.pkl
+raw/
+
