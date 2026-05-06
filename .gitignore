@@ -1,0 +1,5 @@
+__pycache__/
+data/
+fed_env/
+*.pdf
+pdf_text.txt
