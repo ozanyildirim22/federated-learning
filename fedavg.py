@@ -17,17 +17,24 @@ class FedAvgTrainer(ClientTrainer):
         self, client_id, global_model, dataset, batch_size, lr, criterion, epochs, cuda,
     ):
         super().__init__(deepcopy(global_model), cuda and torch.cuda.is_available())
-        self.device = next(iter(self.model.parameters())).device
+        if cuda and torch.cuda.is_available():
+            self.model = self.model.cuda()
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
         self.optimizer = optim.SGD(self.model.parameters(), lr=lr)
         self.epochs = epochs
         self.criterion = criterion
         self.lr = lr
         self.batch_size = batch_size
         self.dataset = dataset
-        self.trainloader, self.valloader = get_dataloader(
-            client_id, dataset, batch_size
-        )
+        self.setup_client(client_id)
+
+    def setup_client(self, client_id):
         self.id = client_id
+        self.trainloader, self.valloader = get_dataloader(
+            client_id, self.dataset, self.batch_size
+        )
         self.iter_trainloader = iter(self.trainloader)
         self.iter_valloader = iter(self.valloader)
 

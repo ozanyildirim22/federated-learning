@@ -38,19 +38,16 @@ if __name__ == "__main__":
     criterion = CrossEntropyLoss()
     client_num_in_total = len(listdir("data/{}/pickles".format(args.dataset)))
     client_indices = range(client_num_in_total)
-    trainers = [
-        FedAvgTrainer(
-            client_id=client_id,
-            global_model=global_model,
-            dataset=args.dataset,
-            batch_size=args.batch_size,
-            lr=args.local_lr,
-            criterion=criterion,
-            epochs=args.epochs,
-            cuda=use_cuda,
-        )
-        for client_id in range(client_num_in_total)
-    ]
+    trainer = FedAvgTrainer(
+        client_id=0,
+        global_model=global_model,
+        dataset=args.dataset,
+        batch_size=args.batch_size,
+        lr=args.local_lr,
+        criterion=criterion,
+        epochs=args.epochs,
+        cuda=use_cuda,
+    )
     aggregator = Aggregators.fedavg_aggregate
 
     for r in trange(args.comms_round, desc="\033[1;33mtraining epoch\033[0m"):
@@ -66,7 +63,8 @@ if __name__ == "__main__":
         params_buffer = []
         # train
         for client_id in selected_clients:
-            weight, serialized_param = trainers[client_id].train(global_model_param)
+            trainer.setup_client(client_id)
+            weight, serialized_param = trainer.train(global_model_param)
             weights_buffer.append(weight)
             params_buffer.append(serialized_param)
 
@@ -89,7 +87,8 @@ if __name__ == "__main__":
         )
         global_model_param = SerializationTool.serialize_model(global_model)
         for client_id in selected_clients:
-            stats = trainers[client_id].eval(global_model_param)
+            trainer.setup_client(client_id)
+            stats = trainer.eval(global_model_param)
             avg_loss_g += stats[0]
             avg_acc_g += stats[1]
             avg_loss_l += stats[2]
