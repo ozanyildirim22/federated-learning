@@ -34,13 +34,13 @@ def preprocess(args):
     cifar_test = CIFAR10(current_dir, transform=transforms.ToTensor(), train=False)
     np.random.seed(args.seed)
     train_idxs = hetero_dir_partition(
-        cifar_train.targets, args.client_num_in_total, 10, 0.1
+        cifar_train.targets, args.client_num_in_total, 10, 1.0
     )
 
     # Set random seed again is for making sure numpy split trainset and testset in the same way.
     np.random.seed(args.seed)
     test_idxs = hetero_dir_partition(
-        cifar_test.targets, args.client_num_in_total, 10, 0.1
+        cifar_test.targets, args.client_num_in_total, 10, 1.0
     )
     # Now train_idxs[i] and test_idxs[i] have the same classes.
 
