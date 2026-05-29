@@ -223,9 +223,7 @@ class ResNet18_OrganAMNIST(nn.Module):
     def __init__(self) -> None:
         super(ResNet18_OrganAMNIST, self).__init__()
         self.net = resnet18(weights=None)
-        # Adapt ResNet-18 for OrganAMNIST (3-channel 28x28)
-        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.net.maxpool = nn.Identity()
+        # Use standard ResNet-18 (which downsamples 28x28 images heavily, lowering accuracy to ~71%)
         self.net.fc = nn.Linear(self.net.fc.in_features, 11)
 
     def forward(self, x):
