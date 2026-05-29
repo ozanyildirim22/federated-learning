@@ -15,6 +15,9 @@ from data.cifar import CIFARDataset
 from data.mnist import MNISTDataset
 from data.synthetic import SyntheticDataset
 from data.emnist import EMNISTDataset
+from data.cifar100 import CIFAR100Dataset
+from data.organamnist import OrganAMNISTDataset
+from data.bloodmnist import BloodMNISTDataset
 # ===================================================================
 
 if __name__ == "__main__":

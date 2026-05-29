@@ -73,6 +73,21 @@ def get_model(model_info):
             return MLP_SYNTHETIC()
         else:
             raise NotImplementedError
+    elif _dataset == "cifar100":
+        if _struct == "resnet50":
+            return ResNet50_CIFAR100()
+        else:
+            raise NotImplementedError
+    elif _dataset == "organamnist":
+        if _struct == "resnet18":
+            return ResNet18_OrganAMNIST()
+        else:
+            raise NotImplementedError
+    elif _dataset == "bloodmnist":
+        if _struct == "resnet18":
+            return ResNet18_BloodMNIST()
+        else:
+            raise NotImplementedError
 
 
 @torch.no_grad()

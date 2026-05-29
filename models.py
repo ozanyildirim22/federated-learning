@@ -1,5 +1,6 @@
 from torch import nn
-from torchvision.models import resnet34, resnet18
+from torchvision.models import resnet34, resnet18, resnet50
+
 
 class CNN_MNIST(nn.Module):
     def __init__(self) -> None:
@@ -199,3 +200,54 @@ class ResNet18_CIFAR(nn.Module):
     @property
     def info(self):
         return ("resnet18", "cifar")
+
+
+class ResNet50_CIFAR100(nn.Module):
+    def __init__(self) -> None:
+        super(ResNet50_CIFAR100, self).__init__()
+        self.net = resnet50(weights=None)
+        # Adapt ResNet-50 for CIFAR-100 (32x32 instead of 224x224)
+        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.net.maxpool = nn.Identity()
+        self.net.fc = nn.Linear(self.net.fc.in_features, 100)
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("resnet50", "cifar100")
+
+
+class ResNet18_OrganAMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(ResNet18_OrganAMNIST, self).__init__()
+        self.net = resnet18(weights=None)
+        # Adapt ResNet-18 for OrganAMNIST (3-channel 28x28)
+        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.net.maxpool = nn.Identity()
+        self.net.fc = nn.Linear(self.net.fc.in_features, 11)
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("resnet18", "organamnist")
+
+
+class ResNet18_BloodMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(ResNet18_BloodMNIST, self).__init__()
+        self.net = resnet18(weights=None)
+        # Adapt ResNet-18 for BloodMNIST (3-channel 28x28)
+        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.net.maxpool = nn.Identity()
+        self.net.fc = nn.Linear(self.net.fc.in_features, 8)
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("resnet18", "bloodmnist")
