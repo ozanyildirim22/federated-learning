@@ -59,6 +59,15 @@ def get_model(model_info):
             return CNN_FEMNIST()
         else:
             raise ValueError
+    elif _dataset == "emnist":
+        if _struct == "mlp":
+            return MLP_EMNIST()
+        elif _struct == "cnn":
+            return CNN_EMNIST()
+        elif _struct == "resnet18":
+            return ResNet18_EMNIST()
+        else:
+            raise ValueError
     elif _dataset == "synthetic":
         if _struct == "mlp":
             return MLP_SYNTHETIC()

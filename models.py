@@ -23,6 +23,65 @@ class CNN_MNIST(nn.Module):
         return ("cnn", "mnist")
 
 
+class CNN_EMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(CNN_EMNIST, self).__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 32, 5),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 5),
+            nn.MaxPool2d(2),
+            nn.Flatten(),
+            nn.Linear(1024, 512),
+            nn.ReLU(True),
+            nn.Linear(512, 62),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("cnn", "emnist")
+
+
+class MLP_EMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(MLP_EMNIST, self).__init__()
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(784, 200),
+            nn.ReLU(True),
+            nn.Linear(200, 200),
+            nn.ReLU(True),
+            nn.Linear(200, 62),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("mlp", "emnist")
+
+
+class ResNet18_EMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(ResNet18_EMNIST, self).__init__()
+        self.net = resnet18(weights=None)
+        # Adapt ResNet-18 for EMNIST (1-channel 28x28 instead of 3-channel 224x224)
+        self.net.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.net.maxpool = nn.Identity()
+        self.net.fc = nn.Linear(self.net.fc.in_features, 62)
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("resnet18", "emnist")
+
+
 class MLP_MNIST(nn.Module):
     def __init__(self) -> None:
         super(MLP_MNIST, self).__init__()

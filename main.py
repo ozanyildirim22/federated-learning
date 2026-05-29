@@ -14,6 +14,7 @@ from os import listdir
 from data.cifar import CIFARDataset
 from data.mnist import MNISTDataset
 from data.synthetic import SyntheticDataset
+from data.emnist import EMNISTDataset
 # ===================================================================
 
 if __name__ == "__main__":
