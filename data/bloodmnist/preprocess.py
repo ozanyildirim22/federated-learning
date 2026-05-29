@@ -32,6 +32,7 @@ def preprocess(args):
 
     transform = transforms.Compose([
         transforms.ToTensor(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1) if x.shape[0] == 1 else x),
     ])
 
     # BloodMNIST: 8 classes, 3-channel 28x28 (cross-silo)
