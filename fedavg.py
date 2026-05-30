@@ -15,6 +15,7 @@ from utils import evaluate
 class FedAvgTrainer(ClientTrainer):
     def __init__(
         self, client_id, global_model, dataset, batch_size, lr, criterion, epochs, cuda,
+        alpha=0.1, label_ratio=0.2,
     ):
         super().__init__(deepcopy(global_model), cuda and torch.cuda.is_available())
         self.device = next(iter(self.model.parameters())).device
@@ -24,9 +25,14 @@ class FedAvgTrainer(ClientTrainer):
         self.lr = lr
         self.batch_size = batch_size
         self.dataset = dataset
-        self.trainloader, self.valloader = get_dataloader(
-            client_id, dataset, batch_size
+        loaders = get_dataloader(
+            client_id, dataset, batch_size, alpha=alpha, label_ratio=label_ratio
         )
+        if len(loaders) == 3:
+            self.trainloader, self.unlabeled_loader, self.valloader = loaders
+        else:
+            self.trainloader, self.valloader = loaders
+            self.unlabeled_loader = None
         self.id = client_id
         self.iter_trainloader = iter(self.trainloader)
         self.iter_valloader = iter(self.valloader)

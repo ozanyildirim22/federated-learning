@@ -31,6 +31,8 @@ def get_args(parser: ArgumentParser):
         help="Use CUDA if available (true/false).",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--alpha", type=float, default=0.1, help="Dirichlet distribution parameter alpha (used to locate preprocessed data)")
+    parser.add_argument("--label_ratio", type=float, default=0.2, help="Fraction of labeled training data per client (used to locate preprocessed data)")
     return parser.parse_args()
 
 

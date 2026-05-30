@@ -7,11 +7,11 @@ from .organamnist import get_organamnist
 from .bloodmnist import get_bloodmnist
 
 
-def get_dataloader(client_id, dataset, batch_size):
+def get_dataloader(client_id, dataset, batch_size, **kwargs):
     if dataset == "mnist":
         return get_mnist(client_id, batch_size)
     elif dataset == "cifar":
-        return get_cifar(client_id, batch_size)
+        return get_cifar(client_id, batch_size, **kwargs)
     elif dataset == "emnist":
         return get_emnist(client_id, batch_size)
     elif dataset == "cifar100":

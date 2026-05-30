@@ -40,7 +40,12 @@ if __name__ == "__main__":
 
     global_model = get_model((args.model, args.dataset))
     criterion = CrossEntropyLoss()
-    client_num_in_total = len(listdir("data/{}/pickles".format(args.dataset)))
+    # Determine pickle directory based on dataset
+    if args.dataset == "cifar":
+        pickle_dir = "data/{}/pickles_alpha{}_label{}".format(args.dataset, args.alpha, args.label_ratio)
+    else:
+        pickle_dir = "data/{}/pickles".format(args.dataset)
+    client_num_in_total = len(listdir(pickle_dir))
     client_indices = range(client_num_in_total)
     trainers = [
         FedAvgTrainer(
@@ -52,6 +57,8 @@ if __name__ == "__main__":
             criterion=criterion,
             epochs=args.epochs,
             cuda=use_cuda,
+            alpha=args.alpha,
+            label_ratio=args.label_ratio,
         )
         for client_id in range(client_num_in_total)
     ]
