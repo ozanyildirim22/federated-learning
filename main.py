@@ -52,6 +52,7 @@ if __name__ == "__main__":
             criterion=criterion,
             epochs=args.epochs,
             cuda=use_cuda,
+            T_max=args.comms_round,
         )
         for client_id in range(client_num_in_total)
     ]

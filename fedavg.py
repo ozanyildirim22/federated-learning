@@ -15,10 +15,20 @@ from utils import evaluate
 class FedAvgTrainer(ClientTrainer):
     def __init__(
         self, client_id, global_model, dataset, batch_size, lr, criterion, epochs, cuda,
+        T_max=1000,
     ):
         super().__init__(deepcopy(global_model), cuda and torch.cuda.is_available())
         self.device = next(iter(self.model.parameters())).device
-        self.optimizer = optim.SGD(self.model.parameters(), lr=lr)
+        self.optimizer = optim.SGD(
+            self.model.parameters(),
+            lr=lr,
+            momentum=0.9,
+            weight_decay=1e-4
+        )
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=T_max
+        )
         self.epochs = epochs
         self.criterion = criterion
         self.lr = lr
@@ -34,12 +44,19 @@ class FedAvgTrainer(ClientTrainer):
     def train(self, global_model_parameters):
         SerializationTool.deserialize_model(self.model, global_model_parameters)
 
-        return self._train(self.model, self.optimizer, self.epochs)
+        result = self._train(self.model, self.optimizer, self.epochs)
+        self.scheduler.step()
+        return result
 
     def eval(self, global_model_parameters):
         # using client local model's replica for evaluating
         model_4_eval = deepcopy(self.model)
-        optimizer = optim.SGD(model_4_eval.parameters(), lr=self.lr)
+        optimizer = optim.SGD(
+            model_4_eval.parameters(),
+            lr=self.lr,
+            momentum=0.9,
+            weight_decay=1e-4
+        )
         SerializationTool.deserialize_model(model_4_eval, global_model_parameters)
         # evaluate global FedAvg performance
         loss_g, acc_g = evaluate(model_4_eval, self.valloader, self.criterion, self.device)

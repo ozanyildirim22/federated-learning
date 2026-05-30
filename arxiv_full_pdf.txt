@@ -1,0 +1,1251 @@
+Local or Global: Selective Knowledge Assimilation
+for Federated Learning with Limited Labels
+Yae Jee Cho †
+Carnegie Mellon University
+yaejeec@andrew.cmu.edu
+Gauri Joshi
+Carnegie Mellon University
+gaurij@andrew.cmu.edu
+Dimitrios Dimitriadis †
+Amazon
+dbdim@amazon.com
+Abstract
+Many existing FL methods assume clients with fully-labeled data, while in realistic settings, clients
+have limited labels due to the expensive and laborious process of labeling. Limited labeled local data of the
+clients often leads to their local model having poor generalization abilities to their larger unlabeled local
+data, such as having class-distribution mismatch with the unlabeled data. As a result, clients may instead
+look to benefit from the global model trained across clients to leverage their unlabeled data, but this also
+becomes difficult due to data heterogeneity across clients. In our work, we proposeFedLabel where
+clients selectively choose the local or global model to pseudo-label their unlabeled data depending on
+which is more of an expert of the data. We further utilize both the local and global models’ knowledge via
+global-local consistency regularization which minimizes the divergence between the two models’ outputs
+when they have identical pseudo-labels for the unlabeled data. Unlike other semi-supervised FL baselines,
+our method does not require additional experts other than the local or global model, nor require additional
+parameters to be communicated. We also do not assume any server-labeled data or fully labeled clients.
+For both cross-device and cross-silo settings, we show thatFedLabel outperforms other semi-supervised
+FL baselines by8-24%, and even outperforms standard fully supervised FL baselines (100% labeled data)
+with only 5-20% of labeled data.
+1 Introduction
+Federated learning (FL) [1] enables collaborative learning across clients without explicit disclosure of their
+local data [2, 3]. In FL, a server updates its global model by aggregating the local gradients obtained
+from clients’ training on their datasets. These clients can be a number of edge-devices such as cell-phones
+(cross-device) [4] or a handful of hospitals, for example, willing to train a model for disease prediction without
+sharing patients’ private data (cross-silo) [5]. While FL can indeed allow clients to train a single global
+model without private data sharing, a crucial yet often overlooked limitation found in realistic FL scenarios
+is that labels can be scarce [6, 7, 8, 9, 10]. In cross-device settings, owners of edge-devices rarely go through
+the effort of labeling all of their local data such as photos, resulting in only a few labeled samples and a
+large volume of unlabeled data. Similarly in cross-silo settings, such as hospitals collaborating for predicting
+diseases, labeling is often a laborious process where healthcare experts are required to process volumes of
+patients’ data [11, 12]. Such scarcity of labels can lead to severe performance degadation as shown in Fig. 1.
+†Work done while at Microsot Research.
+1
+arXiv:2307.08809v1  [cs.LG]  17 Jul 2023
+3HUFHQWDJHRI/DEHOHG'DWD
+
+
+
+7HVW$FFXUDF\
+)HG$YJ)HG3UR[)HG/DEHO
+
+3HUFHQWDJHRI/DEHOHG'DWD
+
+
+
+
+7HVW$FFXUDF\
+)HG$YJ)HG3UR[)HG/DEHO
+(b): OrganAMNIST(Cross-Silo)(a) CIFAR10 (Cross-Device) 
+Figure 1: Test accuracy of the global model for varying
+amount of labeled local data in each client. The
+fewer the labeled data, the lower the test accuracy
+for standard FL algorithms (FedAvg, FedProx) while
+our proposedFedLabel performs significantly higher.
+For CIFAR10,FedLabel achieves an even higher test
+accuracy than when100% of labels are used.
+High Data 20% Labeled 50% Labeled
+Heterogeneity Data Data
+Only Local 32.57 (±2.20) 41.21 (±1.80)
+Only Global 37.51 (±1.80) 38.43 (±0.94)
+Global+Local (ours) 44.51 (±1.85) 50.53 (±1.74)
+Table 1: Test acc. (CIFAR10) when only the local
+or global model is used for pseudo-labeling which
+largely underperforms the case when both models
+are selectively used by our proposedFedLabel.
+0 1 2 3 4 5 6 7 8 9
+Client Index
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10Label
+Labeled Data Distribution
+0 1 2 3 4 5 6 7 8 9
+Client Index
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10Label
+Unlabeled Data Distribution
+Figure 2: Class distribution mismatch (CIFAR10) is
+shown just by limiting the number of labeled data
+to 20% without artificially biasing the labeled data
+distribution.
+A naïve approach to tackle label scarcity in clients is
+using standard semi-supervised learning (SSL) meth-
+ods devised for general machine learning (ML) appli-
+cations at each client, using its own local data. For
+example, consistency regularization methods [13] or
+pseudo-labeling methods [14] can be directly used
+with each client’s local data with its local model.
+However, with limited labels, the feature-label pair
+distribution of the labeled data can be different from
+that of the unlabeled data as shown in Fig. 2 and pre-
+vious work [15, 16]. We call this difference between
+the two distributions asclass distribution mismatch.
+As such, the limited labeled data can poorly gen-
+eralize to a large number of unlabeled local data.
+This is also shown in Table 1, where the ‘Only Local’
+performance largely degrades for a smaller number of labeled data. Due to these scenarios,leveraging only
+the local knowledge of a client may not be enough to fully utilize its unlabeled data. Thus, in FL, a client can
+seek to utilize the global knowledge shared across clients through the aggregation of the local updates to the
+global model. The problem, however, with only using the global knowledge for leveraging the unlabeled data
+at the clients is that the data distribution amongst clients’ local data is heterogeneous [17, 18, 19, 20, 21, 22].
+Due to thisdata heterogeneity, for clients whose local data distribution differs from the overall global data
+distribution, the global model may also not be useful in assisting the clients to leverage their unlabeled data
+as shown in Table 1, ‘Only Global’ case in which the test accuracy is lower than selectively leveraging both
+global and local models.
+Based on the observations above, either the local or global model, or both, can be useful for clients to leverage
+their unlabeled data depending on the labeled data’s generalizability to the unlabeled data and clients’
+data heterogeneity. Therefore, to utilize the setting of FL where clients have access to both the knowledge
+from their local data and the global model, we propose a selective knowledge assimilation method named
+FedLabel where each client chooses between its local and global model to pseudo-label its unlabeled data
+based on each model’s confidence score. Moreover, with our proposed global-local consistency regularization,
+we fully utilize both the local and global models when both have useful knowledge of the unlabeled data.
+2Method Requires Server Requires Fully Requires AdditionallyRequires Additional Robust to
+Labeled Data Labeled Clients Computed Expert(s) Comm.- of Params.Class-Dist. Mismatch
+SemiFL [25] Yes No No No No
+Rscfed [26] No Yes No No No
+FedTriNet [8] No No Yes Yes No
+FedMatch [23] No No Yes Yes No
+F edLabel (ours) No No No No Y es
+Table 2: Comparison of related work withFedLabel.
+Most relevant line of recent work toFedLabel has proposed the server to identify multiple experts for each
+client. The experts can be other clients with similar data distributions [23], or the local, global, and the
+mixture of the local and global models by model splicing [8]. However, the additional computational and
+communication overhead for the server to find and send the appropriate experts for each client can become
+exponentially costly with the increasing participating clients [24]. Moreover, these works treat all experts
+equally, taking an average of their knowledge for leveraging each client’s unlabeled data. Due to this, we
+show that these methods’ performance degrades significantly (see Section 5.2) when the number of labels
+decreases and the data heterogeneity gets higher. In our work,we use only the natural two experts that are
+available in FL, local and global, and show that this is enough to fully utilize the unlabeled dataat the clients
+when executed properly forboth high and lower label scarcity and data heterogeneity cases. Other related
+work proposes methods with restrictive assumptions such as the server having labeled data that is similar to
+the data distribution of the clients [25] or several clients having fully labeled data [26]. In FL, the server does
+not have access to client data and labels are scarce, making these assumptions practically improbable.
+As summarized in Table 2, previous work in SSFL: i) assumes restrictive settings such as the server or several
+clients having good-enough fully labeled data, ii) imposes additional computational/communication burden
+at the server to find and send more experts other than the naturally occurring local and global models, and
+iii) does not consider the poor generalization of limited data to the unlabeled data such as class distribution
+mismatch. Improving on these drawbacks, we propose our novel methodFedLabel, which:
+• Is robust to both the limited generalizability of the labeled data such as class distribution mismatch and
+data heterogeneity by using just two experts, global and local, to leverage a large number of unlabeled
+data (80-95%) with just a few labeled data (5-20%).
+• Does not require the server having any labeled data or a few clients to have fully labeled data. It also does
+not require additional experts to be computed or communicated other than the local and global model
+used in standard FL algorithms [1, 17].
+• Leverages unlabeled data by adaptively choosing either the local or global model based on the confidence
+of the model’s prediction for pseudo-labeling with our proposed global-local consistency regularization that
+minimizes the divergence between the models’ outputs when their pseudo-labels are identical.
+• Achieves 8-24% test accuracy improvement compared to the other SSFL baselines, and even achieves a
+higher test accuracy than fully supervised scenario (100% labeled data) with only using5-20% of labels for
+extensive experiments (3 tasks for cross-device and 2 tasks for cross-silo).
+Before going into the details of our proposed method, we review the related literature on SSL and FL in the
+next section.
+32 Related Work
+Semi-Supervised Learning for General ML.Labels are required to train well-performing models for
+classification tasks, but realistically labels are often scarce and expensive to obtain [27, 28, 29, 30, 31]. To
+tackle such label scarcity for general ML problems, there has been a wide range of works including methods
+such as consistency regularization [13, 32, 33], pseudo-labeling [14, 34, 35], virtual adversarial training [36], and
+per-sample weighting of unlabeled data [37]. As one of the most popular methods, consistency regularization
+leverages unlabeled data by minimizing a model’s prediction difference between the original image and
+perturbed versions of the image [13, 32, 33]. Another commonly used method is pseudo-labeling, a simple
+approach to apply thresholding to the max probability of the prediction and provide a pseudo label for a
+data sample [14]. Pseudo-labeling has also been popularly used in variations such as dynamic thresholding
+based on the sample’s relatedness to the labeled data [35], or class-based thresholding [34]. However, the
+aforementioned work does not jointly consider the poor generalizability that the limited labeled data can
+have to the unlabeled data and the data heterogeneity across clients. We show in Section 5.2 that naively
+combining these SSL methods to FL significantly fails, whileFedLabel is robust to both limited labeled
+data and data heterogeneity.
+Semi-Supervised Learning for FL.Recently, several SSFL methods have been proposed such as utilizing
+inter-client consistency across clients [23], leveraging the labeled data at the server or several clients for
+communication-efficient or personalized SSL for FL [6, 25, 26], or using node classification on graphs for
+handling data with new label domains [38]. FedMatch [23] and FedTriNet [8] are the closest to our work. In
+FedMatch, the server finds clients with similar data distributions for each client and sends the predictions
+from similar data clients for inter-client consistency regularization. In FedTriNet, each client handles three
+models (local, global, and the combination of the two through model splicing) to leverage the unlabeled data
+through a simple average of predictions across the three experts, and also requires the clients to send back
+their loss values to the server. Both approaches not only impose additional communication and computational
+costs for the clients and server but also their performance highly depends on finding the right parameter
+such as the number of helper clients or how to splice the models. Moreover, both methods do not consider
+weighing the experts differently to further combat limited data generalizability and data heterogeneity. We
+show in Section 5.2 that both FedMatch and FedTrinet indeed fail further for a lower percentage of labeled
+data and higher data heterogeneity, whileFedLabel in fact performs even better in these cases by simply
+leveraging only the local and global models.
+3 Problem Formulation
+We consider a FL setup (cross-silo and cross-device) whereM clients are connected to a central server to
+train a well-performing global model for aN-class classification task. Each client’s local data, denoted as
+Dk , k ∈ [M], is consisted of the labeled set(x, y) ∈ D L,k and unlabeled setξ ∈ D U,k, i.e., Dk = DL,k
+S DU,k
+where x, ξ ∈ Rd is the input andy ∈ [1, N] is the label.
+Conventional FL Algorithms’ Assumption.Previous work in FL [18, 39] assumes an ideal scenario where
+each client k has its unlabeled dataDU,k labeled which we call as thehypothetically labeledunlabeled dataset
+denoted as DU ,k. With the ‘hypothetical’ fully labeled dataset of each clientk denoted as Dk = DL,k
+S DU ,k,
+conventional FL algorithms assumes fully labeled data where the server aims to find the model parameter
+w ∈ Rq that minimizes:
+F (w) =
+MX
+k=1
+pkFk(w), F k(w) := 1
+|Dk|
+X
+ξ∈Dk
+f(w, ξ)
+4where pk is the aggregating weight andf(w, ξ) is the loss function for sampleξ := (x, y) and parameter
+vector w.
+Realistic FL with Limited Labeled Data.In practice, much of the available local data may not have
+ground-truth labels. In fact, the number of unlabeled data can be much larger than the labeled data, i.e.,
+|DL,k| ≪ |D U,k|. Then the server can only use the labeled data and effectively minimize
+FL(w)=
+MX
+k=1
+pkFL,k(w), F L,k(w):= 1
+|DL,k|
+X
+ξ∈DL,k
+f(w, ξ)
+where w∗
+L = arg minw FL(w)becomes more different to the solution of the ideal objectivew∗ = arg minw F (w)
+as the distribution ofSM
+k=1 DL,k differs more from the hypothetical ideal datasetSM
+k=1 Dk. Our goal is to
+find an algorithm that can find the model parameterw∗ by using only the labels fromSM
+k=1 DL,k and the
+unlabeled data SM
+k=1 DU,k.
+With clients having only a few labeled data and a larger number of unlabeled data, the labeled data can
+have limited generalization properties to the large unlabeled data due to factors such as class-distribution
+mismatch (the discrepancy between the distributionDL,k and DU ,k) or the mere limited number of its samples.
+Moreover, data heterogeneity (the discrepancy across the distributions of the clients’ local dataDk, k ∈ [M])
+exacerbates the difficulty of SSFL. We show in our work that our proposedFedLabel enables clients to
+leverage their unlabeled data to the full extent just by selectively using the local and global model despite
+the difficulties caused by data heterogeneity and limited generalizability of the labeled data as explained in
+detail in the next section.
+4 FedLabel: Choose Local or Global
+In this section, we first introduce the novel semi-supervised loss function ofFedLabel over the clients’
+unlabeled data and then present the end-to-end algorithm ofFedLabel for implementation when used in
+realistic FL frameworks. An overview of howFedLabel leverages unlabeled data for each clientk ∈ [M] is
+in Fig. 3.
+4.1 Semi-supervised Loss of FedLabel.
+In the most commonly used vanilla FL [1], there are two natural sources the clients can learn from:the global
+model which is trained across different clients, andthe local modelwhich is trained further with local SGD
+with their own local data. Whether the local or global model, or even both, can be effective for labeling the
+unlabeled data depends on which is more knowledgeable on the data based on what each has learned. For
+instance, if a client has very few labeled data, leading to class distribution mismatch or limited generalization
+capability to the unlabeled data, it can perform badly at correctly matching the labels for the unlabeled data.
+Instead, the global model can be more effective in giving the correct labels for the unlabeled data since it has
+seen more data from different clients. On the other hand, if the local labeled data sufficiently generalizes well
+to the local unlabeled data, the local model is more likely to give correct pseudo labels. This is also observed
+in Table 1 where smaller number of labels leads to the ‘Only Global’ performing better, but for larger number
+of labels ‘Only Local’ performs better. There can also be cases where both the local and global models are
+not useful for leveraging the unlabeled data, and it is best not to use either model.
+5Local Model
+Global Model
+Unlabeled   Datazz
+Confidence Ratio of non-selected model to selected model
+SGD steps on local dataLogit Vectors
+:confidence-score of the prediction
+w
+<latexit sha1_base64="0DLpkSsq+1eBpGeVUYfKUBtZm5M=">AAAB8XicbVDLSgMxFL3js9ZX1aWbYBFclZkq6LLoxmUF+8C2lEx6pw3NZIYko5Shf+HGhSJu/Rt3/o2ZdhbaeiBwOOdecu7xY8G1cd1vZ2V1bX1js7BV3N7Z3dsvHRw2dZQohg0WiUi1fapRcIkNw43AdqyQhr7Alj++yfzWIyrNI3lvJjH2QjqUPOCMGis9dENqRn6QPk37pbJbcWcgy8TLSRly1Pulr+4gYkmI0jBBte54bmx6KVWGM4HTYjfRGFM2pkPsWCppiLqXzhJPyalVBiSIlH3SkJn6eyOlodaT0LeTWUK96GXif14nMcFVL+UyTgxKNv8oSAQxEcnOJwOukBkxsYQyxW1WwkZUUWZsSUVbgrd48jJpViveeaV6d1GuXed1FOAYTuAMPLiEGtxCHRrAQMIzvMKbo50X5935mI+uOPnOEfyB8/kD/QKRHw==</latexit>
+wL,k
+<latexit sha1_base64="bxI31264t+baDbl5xryRd45l6zo=">AAACA3icbZDLSsNAFIZPvNZ6i7rTzWARXEhJqqDLohsXLirYC7QhTKaTdujkwsxEKSHgxldx40IRt76EO9/GaZqFtv4w8PGfc5hzfi/mTCrL+jYWFpeWV1ZLa+X1jc2tbXNntyWjRBDaJBGPRMfDknIW0qZiitNOLCgOPE7b3uhqUm/fUyFZFN6pcUydAA9C5jOClbZcc78XYDX0/PQhc9OcCebpTXYyylyzYlWtXGge7AIqUKjhml+9fkSSgIaKcCxl17Zi5aRYKEY4zcq9RNIYkxEe0K7GEAdUOml+Q4aOtNNHfiT0CxXK3d8TKQ6kHAee7pxsKWdrE/O/WjdR/oWTsjBOFA3J9CM/4UhFaBII6jNBieJjDZgIpndFZIgFJkrHVtYh2LMnz0OrVrVPq7Xbs0r9soijBAdwCMdgwznU4Roa0AQCj/AMr/BmPBkvxrvxMW1dMIqZPfgj4/MH8RWYWA==</latexit>
+⇠
+<latexit sha1_base64="Y9AsMRvmdxTQqcE8JuUntKKm/5U=">AAAB6nicbVBNS8NAEJ34WetX1aOXxSJ4KkkV9Fj04rGi/YA2lM120i7dbMLuRiyhP8GLB0W8+ou8+W/ctjlo64OBx3szzMwLEsG1cd1vZ2V1bX1js7BV3N7Z3dsvHRw2dZwqhg0Wi1i1A6pRcIkNw43AdqKQRoHAVjC6mfqtR1Sax/LBjBP0IzqQPOSMGivdd594r1R2K+4MZJl4OSlDjnqv9NXtxyyNUBomqNYdz02Mn1FlOBM4KXZTjQllIzrAjqWSRqj9bHbqhJxapU/CWNmShszU3xMZjbQeR4HtjKgZ6kVvKv7ndVITXvkZl0lqULL5ojAVxMRk+jfpc4XMiLEllClubyVsSBVlxqZTtCF4iy8vk2a14p1XqncX5dp1HkcBjuEEzsCDS6jBLdShAQwG8Ayv8OYI58V5dz7mrStOPnMEf+B8/gBdM43Z</latexit>
+h(·)
+<latexit sha1_base64="ZK4USMs9FRX7htdBNds3QJ/Hf44=">AAAB73icbVBNSwMxEM3Wr1q/qh69BItQL2W3CnosevFYwX5Au5RsNtuGZpM1mRXK0j/hxYMiXv073vw3pu0etPXBwOO9GWbmBYngBlz32ymsrW9sbhW3Szu7e/sH5cOjtlGppqxFlVC6GxDDBJesBRwE6yaakTgQrBOMb2d+54lpw5V8gEnC/JgMJY84JWCl7qjap6GC80G54tbcOfAq8XJSQTmag/JXP1Q0jZkEKogxPc9NwM+IBk4Fm5b6qWEJoWMyZD1LJYmZ8bP5vVN8ZpUQR0rbkoDn6u+JjMTGTOLAdsYERmbZm4n/eb0Uoms/4zJJgUm6WBSlAoPCs+dxyDWjICaWEKq5vRXTEdGEgo2oZEPwll9eJe16zbuo1e8vK42bPI4iOkGnqIo8dIUa6A41UQtRJNAzekVvzqPz4rw7H4vWgpPPHKM/cD5/AGdyj40=</latexit>
+s(w,⇠)
+<latexit sha1_base64="mZJH8uEsiXpebkb/J0IIRj2+rew=">AAACA3icbZDLSsNAFIYn9VbrLepON4NFqCAlqYIui25cVrAXaEKZTCft0MkkzEzUEgJufBU3LhRx60u4822ctBG09YeBj/+cw5zzexGjUlnWl1FYWFxaXimultbWNza3zO2dlgxjgUkThywUHQ9JwignTUUVI51IEBR4jLS90WVWb98SIWnIb9Q4Im6ABpz6FCOlrZ655wRIDT0/kWnlB+/SY+eeHvXMslW1JoLzYOdQBrkaPfPT6Yc4DghXmCEpu7YVKTdBQlHMSFpyYkkihEdoQLoaOQqIdJPJDSk81E4f+qHQjys4cX9PJCiQchx4ujNbU87WMvO/WjdW/rmbUB7FinA8/ciPGVQhzAKBfSoIVmysAWFB9a4QD5FAWOnYSjoEe/bkeWjVqvZJtXZ9Wq5f5HEUwT44ABVggzNQB1egAZoAgwfwBF7Aq/FoPBtvxvu0tWDkM7vgj4yPbzvPl+M=</latexit>
+s(wL,k,⇠)
+<latexit sha1_base64="luMlaZv+JnT68AMf3x/63vA9l7M=">AAACE3icbZDLSsNAFIYn9VbrLerSzWARqpSSVEGXRTcuXFSwF2hCmUwn7dDJhZmJWkLewY2v4saFIm7duPNtnKQRtPWHgY//nMOc8zsho0IaxpdWWFhcWl4prpbW1jc2t/TtnbYIIo5JCwcs4F0HCcKoT1qSSka6ISfIcxjpOOOLtN65JVzQwL+Rk5DYHhr61KUYSWX19SPLQ3LkuLFIKj94l/TjjDFi8VVSHSdV654e9vWyUTMywXkwcyiDXM2+/mkNAhx5xJeYISF6phFKO0ZcUsxIUrIiQUKEx2hIegp95BFhx9lNCTxQzgC6AVfPlzBzf0/EyBNi4jmqM11VzNZS879aL5LumR1TP4wk8fH0IzdiUAYwDQgOKCdYsokChDlVu0I8QhxhqWIsqRDM2ZPnoV2vmce1+vVJuXGex1EEe2AfVIAJTkEDXIImaAEMHsATeAGv2qP2rL1p79PWgpbP7II/0j6+ASDgnus=</latexit>
+wU,k
+<latexit sha1_base64="0HSXlnzOgCs2FD4xAFsfLtrIwq8=">AAACA3icbZDNSsNAFIUn9a/Wv6g73QwWwYWUpAq6LLpxWcG0hTaEyXTSDp1MwsxEKSHgxldx40IRt76EO9/GSZqFth4Y+Dj3Xube48eMSmVZ30ZlaXllda26XtvY3NreMXf3OjJKBCYOjlgkej6ShFFOHEUVI71YEBT6jHT9yXVe794TIWnE79Q0Jm6IRpwGFCOlLc88GIRIjf0gfci8tGCMWOpkp5PMM+tWwyoEF8EuoQ5KtT3zazCMcBISrjBDUvZtK1ZuioSimJGsNkgkiRGeoBHpa+QoJNJNixsyeKydIQwioR9XsHB/T6QolHIa+roz31LO13Lzv1o/UcGlm1IeJ4pwPPsoSBhUEcwDgUMqCFZsqgFhQfWuEI+RQFjp2Go6BHv+5EXoNBv2WaN5e15vXZVxVMEhOAInwAYXoAVuQBs4AINH8AxewZvxZLwY78bHrLVilDP74I+Mzx/+3Zhh</latexit>
+ 
+<latexit sha1_base64="zOaBxk4xOE3JMcmBuem90Ozc3Jo=">AAAB7HicdVBNSwMxEM3Wr1q/qh69BIvgaUnXte2x6MVjBbcttEvJptM2NJtdkqxQSn+DFw+KePUHefPfmH4IKvpg4PHeDDPzolRwbQj5cHJr6xubW/ntws7u3v5B8fCoqZNMMQhYIhLVjqgGwSUEhhsB7VQBjSMBrWh8Pfdb96A0T+SdmaQQxnQo+YAzaqwUdCMwtFcsEZfU/AqpYOJW/Krn1Szx/EuvSnDZJQuU0AqNXvG9209YFoM0TFCtO2WSmnBKleFMwKzQzTSklI3pEDqWShqDDqeLY2f4zCp9PEiULWnwQv0+MaWx1pM4sp0xNSP925uLf3mdzAxq4ZTLNDMg2XLRIBPYJHj+Oe5zBcyIiSWUKW5vxWxEFWXG5lOwIXx9iv8nTc8tX7jerV+qX63iyKMTdIrOURlVUR3doAYKEEMcPaAn9OxI59F5cV6XrTlnNXOMfsB5+wQu/I7x</latexit>
+2) Confidence-based Model Selection(eq.(5)) 
+cont’d 2) Thresholding (eq.(6)) 
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+>
+<latexit sha1_base64="efjCTFfnSGKk92tdBnmlZBYm7rs=">AAAB6HicbVDLSgNBEOyNrxhfUY9eBoPgKexGQU8S9OIxAfOAZAmzk95kzOzsMjMrhJAv8OJBEa9+kjf/xkmyB00saCiquunuChLBtXHdbye3tr6xuZXfLuzs7u0fFA+PmjpOFcMGi0Ws2gHVKLjEhuFGYDtRSKNAYCsY3c381hMqzWP5YMYJ+hEdSB5yRo2V6je9Ysktu3OQVeJlpAQZar3iV7cfszRCaZigWnc8NzH+hCrDmcBpoZtqTCgb0QF2LJU0Qu1P5odOyZlV+iSMlS1pyFz9PTGhkdbjKLCdETVDvezNxP+8TmrCa3/CZZIalGyxKEwFMTGZfU36XCEzYmwJZYrbWwkbUkWZsdkUbAje8surpFkpexflSv2yVL3N4sjDCZzCOXhwBVW4hxo0gAHCM7zCm/PovDjvzseiNedkM8fwB87nD4+fjMY=</latexit>
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+s(w,⇠)
+<latexit sha1_base64="mZJH8uEsiXpebkb/J0IIRj2+rew=">AAACA3icbZDLSsNAFIYn9VbrLepON4NFqCAlqYIui25cVrAXaEKZTCft0MkkzEzUEgJufBU3LhRx60u4822ctBG09YeBj/+cw5zzexGjUlnWl1FYWFxaXimultbWNza3zO2dlgxjgUkThywUHQ9JwignTUUVI51IEBR4jLS90WVWb98SIWnIb9Q4Im6ABpz6FCOlrZ655wRIDT0/kWnlB+/SY+eeHvXMslW1JoLzYOdQBrkaPfPT6Yc4DghXmCEpu7YVKTdBQlHMSFpyYkkihEdoQLoaOQqIdJPJDSk81E4f+qHQjys4cX9PJCiQchx4ujNbU87WMvO/WjdW/rmbUB7FinA8/ciPGVQhzAKBfSoIVmysAWFB9a4QD5FAWOnYSjoEe/bkeWjVqvZJtXZ9Wq5f5HEUwT44ABVggzNQB1egAZoAgwfwBF7Aq/FoPBtvxvu0tWDkM7vgj4yPbzvPl+M=</latexit>
+s(wL,k,⇠)
+<latexit sha1_base64="luMlaZv+JnT68AMf3x/63vA9l7M=">AAACE3icbZDLSsNAFIYn9VbrLerSzWARqpSSVEGXRTcuXFSwF2hCmUwn7dDJhZmJWkLewY2v4saFIm7duPNtnKQRtPWHgY//nMOc8zsho0IaxpdWWFhcWl4prpbW1jc2t/TtnbYIIo5JCwcs4F0HCcKoT1qSSka6ISfIcxjpOOOLtN65JVzQwL+Rk5DYHhr61KUYSWX19SPLQ3LkuLFIKj94l/TjjDFi8VVSHSdV654e9vWyUTMywXkwcyiDXM2+/mkNAhx5xJeYISF6phFKO0ZcUsxIUrIiQUKEx2hIegp95BFhx9lNCTxQzgC6AVfPlzBzf0/EyBNi4jmqM11VzNZS879aL5LumR1TP4wk8fH0IzdiUAYwDQgOKCdYsokChDlVu0I8QhxhqWIsqRDM2ZPnoV2vmce1+vVJuXGex1EEe2AfVIAJTkEDXIImaAEMHsATeAGv2qP2rL1p79PWgpbP7II/0j6+ASDgnus=</latexit>
+wU,k
+<latexit sha1_base64="0HSXlnzOgCs2FD4xAFsfLtrIwq8=">AAACA3icbZDNSsNAFIUn9a/Wv6g73QwWwYWUpAq6LLpxWcG0hTaEyXTSDp1MwsxEKSHgxldx40IRt76EO9/GSZqFth4Y+Dj3Xube48eMSmVZ30ZlaXllda26XtvY3NreMXf3OjJKBCYOjlgkej6ShFFOHEUVI71YEBT6jHT9yXVe794TIWnE79Q0Jm6IRpwGFCOlLc88GIRIjf0gfci8tGCMWOpkp5PMM+tWwyoEF8EuoQ5KtT3zazCMcBISrjBDUvZtK1ZuioSimJGsNkgkiRGeoBHpa+QoJNJNixsyeKydIQwioR9XsHB/T6QolHIa+roz31LO13Lzv1o/UcGlm1IeJ4pwPPsoSBhUEcwDgUMqCFZsqgFhQfWuEI+RQFjp2Go6BHv+5EXoNBv2WaN5e15vXZVxVMEhOAInwAYXoAVuQBs4AINH8AxewZvxZLwY78bHrLVilDP74I+Mzx/+3Zhh</latexit>
+ˆy⇠ := arg max
+i2[N]
+s(w,⇠)
+<latexit sha1_base64="kxT1McYdkW4FpvrU6lu+rlAfPmA=">AAACInicbVDLSsNAFJ3UV62vqks3wSJUkJJUwQcIRTeupIJ9QBLCZDpph04mYWaiLSHf4sZfceNCUVeCH+O0jaCtBwbOnHMv997jRZQIaRifWm5ufmFxKb9cWFldW98obm41RRhzhBsopCFve1BgShhuSCIpbkccw8CjuOX1L0d+6w5zQUJ2K4cRdgLYZcQnCEolucVTuwdlMkxde0DOzm3Iu3YAB25CbMKsaydVP9nz/ESk5R96nx6o4n23WDIqxhj6LDEzUgIZ6m7x3e6EKA4wk4hCISzTiKSTQC4Jojgt2LHAEUR92MWWogwGWDjJ+MRU31NKR/dDrh6T+lj93ZHAQIhh4KnK0Zpi2huJ/3lWLP0TJyEsiiVmaDLIj6kuQ32Ul94hHCNJh4pAxInaVUc9yCGSKtWCCsGcPnmWNKsV87BSvTkq1S6yOPJgB+yCMjDBMaiBK1AHDYDAA3gCL+BVe9SetTftY1Ka07KebfAH2tc3Yh+lZw==</latexit>
+ k(⇠)KL(s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+ k(⇠)KL(s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+ k(⇠)KL(s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+s(wL,k,⇠)
+<latexit sha1_base64="luMlaZv+JnT68AMf3x/63vA9l7M=">AAACE3icbZDLSsNAFIYn9VbrLerSzWARqpSSVEGXRTcuXFSwF2hCmUwn7dDJhZmJWkLewY2v4saFIm7duPNtnKQRtPWHgY//nMOc8zsho0IaxpdWWFhcWl4prpbW1jc2t/TtnbYIIo5JCwcs4F0HCcKoT1qSSka6ISfIcxjpOOOLtN65JVzQwL+Rk5DYHhr61KUYSWX19SPLQ3LkuLFIKj94l/TjjDFi8VVSHSdV654e9vWyUTMywXkwcyiDXM2+/mkNAhx5xJeYISF6phFKO0ZcUsxIUrIiQUKEx2hIegp95BFhx9lNCTxQzgC6AVfPlzBzf0/EyBNi4jmqM11VzNZS879aL5LumR1TP4wk8fH0IzdiUAYwDQgOKCdYsokChDlVu0I8QhxhqWIsqRDM2ZPnoV2vmce1+vVJuXGex1EEe2AfVIAJTkEDXIImaAEMHsATeAGv2qP2rL1p79PWgpbP7II/0j6+ASDgnus=</latexit>
+ k(⇠)KL(s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+1) Obtain Global and Local Models (eq.(3)-(4))
+Get logit from training model
+3) Global-Local Consistency Regularization (eq.(8)-(9))
+Selected Model
+Selected Pseudo-Label
+Strongly Augmented Unlabeled Dataㅌㅌ (⇠)
+<latexit sha1_base64="27Xdvwa3UwIvRp4lByf2sTCM2KU=">AAAB8HicbVBNTwIxEJ3FL8Qv1KOXRmKCF7KLJnokevGIiYCG3ZBu6UJD2920XSPZ8Cu8eNAYr/4cb/4bC+xBwZdM8vLeTGbmhQln2rjut1NYWV1b3yhulra2d3b3yvsHbR2nitAWiXms7kOsKWeStgwznN4nimIRctoJR9dTv/NIlWaxvDPjhAYCDySLGMHGSg9+MmRV/4md9soVt+bOgJaJl5MK5Gj2yl9+PyapoNIQjrXuem5iggwrwwink5KfappgMsID2rVUYkF1kM0OnqATq/RRFCtb0qCZ+nsiw0LrsQhtp8BmqBe9qfif101NdBlkTCapoZLMF0UpRyZG0+9RnylKDB9bgoli9lZEhlhhYmxGJRuCt/jyMmnXa95ZrX57Xmlc5XEU4QiOoQoeXEADbqAJLSAg4Ble4c1Rzovz7nzMWwtOPnMIf+B8/gAz/5AD</latexit>
+ˆy⇠
+<latexit sha1_base64="wvmRxJBTO7YZFU8vKNWOmLuiAAo=">AAAB8nicbVBNS8NAEN3Ur1q/qh69LBbBU0mqoMeiF48V7Ac0oWy2m3bpZjfsTsQQ+jO8eFDEq7/Gm//GbZuDtj4YeLw3w8y8MBHcgOt+O6W19Y3NrfJ2ZWd3b/+genjUMSrVlLWpEkr3QmKY4JK1gYNgvUQzEoeCdcPJ7czvPjJtuJIPkCUsiMlI8ohTAlbq+2MCeTYd+E98UK25dXcOvEq8gtRQgdag+uUPFU1jJoEKYkzfcxMIcqKBU8GmFT81LCF0Qkasb6kkMTNBPj95is+sMsSR0rYk4Ln6eyInsTFZHNrOmMDYLHsz8T+vn0J0HeRcJikwSReLolRgUHj2Px5yzSiIzBJCNbe3YjommlCwKVVsCN7yy6uk06h7F/XG/WWteVPEUUYn6BSdIw9doSa6Qy3URhQp9Ixe0ZsDzovz7nwsWktOMXOM/sD5/AHF7ZGS</latexit>
+ k(⇠)KL(s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+h (s(w ,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+h (s(w ,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+ˆ⇠:=
+<latexit sha1_base64="MsyfrptmkLbnYARUMuYt2o+tcqc=">AAAB8nicbVBNSwMxEM3Wr1q/qh69BIvgqexWQRGEohePFewH7C4lm6ZtaDZZklmxLP0ZXjwo4tVf481/Y9ruQVsfDDzem2FmXpQIbsB1v53Cyura+kZxs7S1vbO7V94/aBmVasqaVAmlOxExTHDJmsBBsE6iGYkjwdrR6Hbqtx+ZNlzJBxgnLIzJQPI+pwSs5AdDAlnwxCdX191yxa26M+Bl4uWkgnI0uuWvoKdoGjMJVBBjfM9NIMyIBk4Fm5SC1LCE0BEZMN9SSWJmwmx28gSfWKWH+0rbkoBn6u+JjMTGjOPIdsYEhmbRm4r/eX4K/csw4zJJgUk6X9RPBQaFp//jHteMghhbQqjm9lZMh0QTCjalkg3BW3x5mbRqVe+sWrs/r9Rv8jiK6Agdo1PkoQtUR3eogZqIIoWe0St6c8B5cd6dj3lrwclnDtEfOJ8/MmaRMQ==</latexit>
+Consistency-Regularization:Adaptive Weight: k(⇠)=
+ 0h(s(wL,k,⇠)
+h(s(w,⇠)
+ 0
+<latexit sha1_base64="9SnAvd3O3+pL01GMRmkL5E3cBr4=">AAACY3icdVHLSgMxFM2MWmt9dHzsRAgWoYKUGRV0IxTduHBRwdpCpwyZNGNDMw+TjFrD9CPduXPjf5hpq2jVC4HDOefe3Jz4CaNC2varYc7NLxQWi0ul5ZXVtbK1vnEr4pRj0sQxi3nbR4IwGpGmpJKRdsIJCn1GWv7gItdbD4QLGkc3cpiQbojuIhpQjKSmPOvZZdrcQ96g6j7R/TM34AirT9KG/aobItn3AyWyL/iYeWqMMWLqKjsYZAd5c6ZGo3/8E91l5B5+zfasil2zxwV/A2cKKmBaDc96cXsxTkMSScyQEB3HTmRXIS4pZiQruakgCcIDdEc6GkYoJKKrxhllcE8zPRjEXJ9IwjH7vUOhUIhh6GtnvrWY1XLyL62TyuC0q2iUpJJEeHJRkDIoY5gHDnuUEyzZUAOEOdW7QtxHOmWpv6WkQ3Bmn/wb3B7WnKPa4fVxpX4+jaMItsEuqAIHnIA6uAQN0AQYvBkFo2xYxru5bG6YWxOraUx7NsGPMnc+AAehuQ4=</latexit>
+(eq. (7)) k(⇠)KL (s(wU,k,⇠),s(w,⇠))
+<latexit sha1_base64="1PeUHGY5X/+DSPI2UEEB0dCa+38=">AAACQHicbZDNS8MwGMbT+TXn19Sjl+IQNhijnYIeh14EPUxwH7CWkqbpFpZ+kKTqKP3TvPgnePPsxYMiXj2ZdkV02wuBH8/zhLx57JASLjTtRSksLa+srhXXSxubW9s75d29Lg8ihnAHBTRgfRtyTImPO4IIivshw9CzKe7Z44vU791hxkng34pJiE0PDn3iEgSFlKxyz6Ay7EBrXDUeSO3qump4UIxsN+bJL94nVpwxgjTuJPVxUk/D9YXRzKpZ5YrW0LJR50HPoQLyaVvlZ8MJUORhXyAKOR/oWijMGDJBEMVJyYg4DiEawyEeSPShh7kZZwUk6pFUHNUNmDy+UDP1740YepxPPFsm0z35rJeKi7xBJNwzMyZ+GAnso+lDbkRVEahpm6pDGEaCTiRAxIjcVUUjyCASsvOSLEGf/fI8dJsN/bjRvDmptM7zOorgAByCKtDBKWiBS9AGHYDAI3gF7+BDeVLelE/laxotKPmdffBvlO8fvVKxDw==</latexit>
+h (s(w ,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+h (s(w ,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+ˆ⇠:=
+<latexit sha1_base64="MsyfrptmkLbnYARUMuYt2o+tcqc=">AAAB8nicbVBNSwMxEM3Wr1q/qh69BIvgqexWQRGEohePFewH7C4lm6ZtaDZZklmxLP0ZXjwo4tVf481/Y9ruQVsfDDzem2FmXpQIbsB1v53Cyura+kZxs7S1vbO7V94/aBmVasqaVAmlOxExTHDJmsBBsE6iGYkjwdrR6Hbqtx+ZNlzJBxgnLIzJQPI+pwSs5AdDAlnwxCdX191yxa26M+Bl4uWkgnI0uuWvoKdoGjMJVBBjfM9NIMyIBk4Fm5SC1LCE0BEZMN9SSWJmwmx28gSfWKWH+0rbkoBn6u+JjMTGjOPIdsYEhmbRm4r/eX4K/csw4zJJgUk6X9RPBQaFp//jHteMghhbQqjm9lZMh0QTCjalkg3BW3x5mbRqVe+sWrs/r9Rv8jiK6Agdo1PkoQtUR3eogZqIIoWe0St6c8B5cd6dj3lrwclnDtEfOJ8/MmaRMQ==</latexit>
+If :max
+i2[N]
+s(w,⇠)> 
+<latexit sha1_base64="hLFsPQd0w3Jx7SJq4zjYrL2sons=">AAACF3icbVDLSsNAFJ3UV62vqks3wSJUkJBUQVdSdONKKtgHJCFMppN26GQSZibaEvIXbvwVNy4Ucas7/8ZpG0FbDwycOede7r3HjykR0jS/tMLC4tLySnG1tLa+sblV3t5piSjhCDdRRCPe8aHAlDDclERS3Ik5hqFPcdsfXI799h3mgkTsVo5i7Iawx0hAEJRK8sqGE8KhlxKHMPvazdRP9v0gFVn1h95nR86QHJ47PpbQK1dMw5xAnydWTiogR8MrfzrdCCUhZhJRKIRtmbF0U8glQRRnJScROIZoAHvYVpTBEAs3ndyV6QdK6epBxNVjUp+ovztSGAoxCn1VOV5WzHpj8T/PTmRw5qaExYnEDE0HBQnVZaSPQ9K7hGMk6UgRiDhRu+qoDzlEUkVZUiFYsyfPk1bNsI6N2s1JpX6Rx1EEe2AfVIEFTkEdXIEGaAIEHsATeAGv2qP2rL1p79PSgpb37II/0D6+ARlVoHw=</latexit>
+CrossEntropy
+<latexit sha1_base64="55alT///Y7J+IEYNRzy2n+HPQdo=">AAAB83icbVBNSwMxEM36WetX1aOXYBE8ld0q6LFYBI8V7Ae0S8mm2TY0m4RkVlhK/4YXD4p49c9489+YtnvQ1gcDj/dmmJkXacEt+P63t7a+sbm1Xdgp7u7tHxyWjo5bVqWGsiZVQplORCwTXLImcBCsow0jSSRYOxrXZ377iRnLlXyETLMwIUPJY04JOKlXN8raOwlG6axfKvsVfw68SoKclFGORr/01RsomiZMAhXE2m7gawgnxACngk2LvdQyTeiYDFnXUUkSZsPJ/OYpPnfKAMfKuJKA5+rviQlJrM2SyHUmBEZ22ZuJ/3ndFOKbcMKlToFJulgUpwKDwrMA8IAbRkFkjhBquLsV0xExhIKLqehCCJZfXiWtaiW4rFQfrsq12zyOAjpFZ+gCBega1dA9aqAmokijZ/SK3rzUe/HevY9F65qXz5ygP/A+fwBvBZHx</latexit>
+If :ˆy⇠ = arg max
+i2[N]
+s(wL,k,⇠)
+<latexit sha1_base64="bv6Pf4bm0lGtm/OiC0Jlhdqak/o=">AAACMXicbZBNS8NAEIY39avWr6pHL8EiKJSSVEEvQtFLDyIKVoUmhMl20y7dbMLuRluW/CUv/hPx4kERr/4Jt7WCXwMLz74zw8y8YcqoVI7zZBWmpmdm54rzpYXFpeWV8urapUwygUkLJywR1yFIwignLUUVI9epIBCHjFyF/eNR/uqGCEkTfqGGKfFj6HIaUQzKSEG56fVA6WEeeAN66IHoejEMAk09ytunfm5+qhdGWubbX3ibB3rMGJg+yav9vGp6d4Jyxak547D/gjuBCprEWVB+8DoJzmLCFWYgZdt1UuVrEIpiRvKSl0mSAu5Dl7QNcoiJ9PX44tzeMkrHjhJhHlf2WP3eoSGWchiHpnK0qvydG4n/5dqZig58TXmaKcLx56AoY7ZK7JF9docKghUbGgAsqNnVxj0QgJUxuWRMcH+f/Bcu6zV3t1Y/36s0jiZ2FNEG2kTbyEX7qIGa6Ay1EEZ36BE9oxfr3nqyXq23z9KCNelZRz/Cev8Af/+sKw==</latexit>
+ˆy⇠= arg max
+i2[N]
+s(wL,k,⇠)
+<latexit sha1_base64="bv6Pf4bm0lGtm/OiC0Jlhdqak/o=">AAACMXicbZBNS8NAEIY39avWr6pHL8EiKJSSVEEvQtFLDyIKVoUmhMl20y7dbMLuRluW/CUv/hPx4kERr/4Jt7WCXwMLz74zw8y8YcqoVI7zZBWmpmdm54rzpYXFpeWV8urapUwygUkLJywR1yFIwignLUUVI9epIBCHjFyF/eNR/uqGCEkTfqGGKfFj6HIaUQzKSEG56fVA6WEeeAN66IHoejEMAk09ytunfm5+qhdGWubbX3ibB3rMGJg+yav9vGp6d4Jyxak547D/gjuBCprEWVB+8DoJzmLCFWYgZdt1UuVrEIpiRvKSl0mSAu5Dl7QNcoiJ9PX44tzeMkrHjhJhHlf2WP3eoSGWchiHpnK0qvydG4n/5dqZig58TXmaKcLx56AoY7ZK7JF9docKghUbGgAsqNnVxj0QgJUxuWRMcH+f/Bcu6zV3t1Y/36s0jiZ2FNEG2kTbyEX7qIGa6Ay1EEZ36BE9oxfr3nqyXq23z9KCNelZRz/Cev8Af/+sKw==</latexit>
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+h(s(w,⇠))
+<latexit sha1_base64="9qT9fulqr6txwasIB4gMlyBvTuc=">AAACEXicbZDLSsNAFIYn9VbrLerSTbAILUhJqqDLohuXFewFmlAm00k7dHJh5kQtIa/gxldx40IRt+7c+TZO2iDa+sPAx3/OYc753YgzCab5pRWWlldW14rrpY3Nre0dfXevLcNYENoiIQ9F18WSchbQFjDgtBsJin2X0447vszqnVsqJAuDG5hE1PHxMGAeIxiU1dcrI5tTDyq2j2HkeolMf/AuPbbvWdUWbDiCal8vmzVzKmMRrBzKKFezr3/ag5DEPg2AcCxlzzIjcBIsgBFO05IdSxphMsZD2lMYYJ9KJ5lelBpHyhkYXijUC8CYur8nEuxLOfFd1ZltK+drmflfrReDd+4kLIhioAGZfeTF3IDQyOIxBkxQAnyiABPB1K4GGWGBCagQSyoEa/7kRWjXa9ZJrX59Wm5c5HEU0QE6RBVkoTPUQFeoiVqIoAf0hF7Qq/aoPWtv2vustaDlM/voj7SPb9+Knak=</latexit>
+ˆy⇠ = arg max
+i2[N]
+s(wL,k,⇠)
+<latexit sha1_base64="bv6Pf4bm0lGtm/OiC0Jlhdqak/o=">AAACMXicbZBNS8NAEIY39avWr6pHL8EiKJSSVEEvQtFLDyIKVoUmhMl20y7dbMLuRluW/CUv/hPx4kERr/4Jt7WCXwMLz74zw8y8YcqoVI7zZBWmpmdm54rzpYXFpeWV8urapUwygUkLJywR1yFIwignLUUVI9epIBCHjFyF/eNR/uqGCEkTfqGGKfFj6HIaUQzKSEG56fVA6WEeeAN66IHoejEMAk09ytunfm5+qhdGWubbX3ibB3rMGJg+yav9vGp6d4Jyxak547D/gjuBCprEWVB+8DoJzmLCFWYgZdt1UuVrEIpiRvKSl0mSAu5Dl7QNcoiJ9PX44tzeMkrHjhJhHlf2WP3eoSGWchiHpnK0qvydG4n/5dqZig58TXmaKcLx56AoY7ZK7JF9docKghUbGgAsqNnVxj0QgJUxuWRMcH+f/Bcu6zV3t1Y/36s0jiZ2FNEG2kTbyEX7qIGa6Ay1EEZ36BE9oxfr3nqyXq23z9KCNelZRz/Cev8Af/+sKw==</latexit>
+ˆy⇠ = arg max
+i2[N]
+s(wL,k,⇠)
+<latexit sha1_base64="bv6Pf4bm0lGtm/OiC0Jlhdqak/o=">AAACMXicbZBNS8NAEIY39avWr6pHL8EiKJSSVEEvQtFLDyIKVoUmhMl20y7dbMLuRluW/CUv/hPx4kERr/4Jt7WCXwMLz74zw8y8YcqoVI7zZBWmpmdm54rzpYXFpeWV8urapUwygUkLJywR1yFIwignLUUVI9epIBCHjFyF/eNR/uqGCEkTfqGGKfFj6HIaUQzKSEG56fVA6WEeeAN66IHoejEMAk09ytunfm5+qhdGWubbX3ibB3rMGJg+yav9vGp6d4Jyxak547D/gjuBCprEWVB+8DoJzmLCFWYgZdt1UuVrEIpiRvKSl0mSAu5Dl7QNcoiJ9PX44tzeMkrHjhJhHlf2WP3eoSGWchiHpnK0qvydG4n/5dqZig58TXmaKcLx56AoY7ZK7JF9docKghUbGgAsqNnVxj0QgJUxuWRMcH+f/Bcu6zV3t1Y/36s0jiZ2FNEG2kTbyEX7qIGa6Ay1EEZ36BE9oxfr3nqyXq23z9KCNelZRz/Cev8Af/+sKw==</latexit>
+Non-SelectedModel’sPseudo-LabelSelectedModel’sPseudo-Label
+Figure 3: Overview ofFedLabel leveraging unlabeled data for each clientk ∈ [M]. FedLabel consists of 3
+main steps to leverage unlabeled data: 1) Obtaining global and local models (eq. (1)-(2)), 2) Confidence-based
+selection with thresholding for obtaining the pseudo-label for the cross-entropy loss (eq. (3)-(4)), and 3) the
+global-local consistency regularizing term to assimilate knowledge from both global and local models when
+applicable (eq. (6)-(7)). Details of the end-to-end algorithm ofFedLabel is in Algorithm 1.
+Based on this observation, we proposeFedLabel that adaptively chooses either the local or global model
+based on the confidence score of each model’s logits for pseudo-labeling. If both models’ confidence does not
+exceed a certain threshold, we do not use that unlabeled data. Such binary choice of the model, however, can
+lead to losing relevant information from the other discarded model despite it having the same hard-label
+prediction as the chosen model. To assimilate both information from the local and global model for such
+scenarios, FedLabel adds global-local consistency regularization that minimizes the divergence between
+the local and global models’ outputs. To the best of our knowledge, adaptive selection of the global and
+local model for pseudo-labeling and assimilating more knowledge, when needed, with global-local consistency
+regularization is a novel method that has not been previously proposed.
+1) Obtaining Global and Local Models (same as Standard FedAvg [1]). With superscript (t, r)
+denoting the communication roundt and local iterationr, for eacht the server selects a set of clientsC(t,0)
+uniformly at random and sends the global modelw(t,0) to clients inC(t,0). The clients inC(t,0) initialize their
+local model for supervised training asw(t,0)
+L,k = w(t,0) to perform τ local iterations with learning rateη to
+obtain their respectivesupervised local models as:
+(Perform Local SGD onLabeled Data)
+w(t,τ )
+L,k = w(t,0)
+L,k − η
+τ −1X
+l=0
+∇FL,k(w(t,l)
+L,k , ξ(t,l)
+L,k ) (1)
+(Compute theSupervised Local Update)
+∆w(t,0)
+L,k = w(t,τ )
+L,k − w(t,0)
+L,k (2)
+where ∇FL,k(w(t,l)
+L,k , ξ(t,l)
+L,k ) = 1
+b
+P
+ξ∈ξ(t,l)
+L,k
+∇f(w(t,l)
+L,k , ξ) is the stochastic gradient computed with mini-batch
+ξ(t,l)
+L,k of size b randomly sampled fromDL,k. Note that FedLabel does not alter the local update procedure
+used in standard FL algorithms [1, 17], and can be easily extended to using different methods to obtain the
+local model w(t,τ )
+L,k .
+62) Confidence-based Selection with Thresholding.After performing local SGD on the labeled data
+as in (1), clients have the global modelw(t,0) and the local model trained with labeled dataw(t,τ )
+L,k . Each
+client k ∈ C (t,0) gets the logits from each the global and local model from the unlabeled dataξ ∈ D U,k
+denoted as s(w(t,0), ξ ) and s(w(t,τ )
+L,k , ξ ) respectively where s(·, ·) : Rq × Rd → RN ×1. We then use function
+h(·) : RN ×1 → R that calculates the confidence-score (variance) of the logits and select the logit with the
+higher confidence-score to pseudo-label the unlabeled data. While we use variance to calculate confidence as
+in previous literature [40], FedLabel is not restricted to this metric. We include an ablation study on what
+to use as the confidence score of the logits in Appendix A. Formally, we have that
+Binary Selection of Logit:s∗(ξ) = arg max
+s∈S (t)(ξ)
+h(s),
+S (t)(ξ) := {s(w(t,0), ξ ), s(w(t,τ )
+L,k , ξ )}
+(3)
+Pseudo Label from Thresholding:
+ˆyξ(β) = arg max
+i∈[N ]
+s∗(ξ)1 (max s∗(ξ) > β) (4)
+We discard the instances ofˆyξ(β) = 0 which indicates that the selected logit did not pass the thresholding
+function in (4). Given thatˆyξ(β) ̸= 0, we have the pseudo-labelˆyξ(β) obtained via (4) for the unlabeld data
+ξ ∈ D U,k. Then, with the separately set local model to be trained over the unlabeled data defined aswU ,k,
+we have the cross-entropy loss forFedLabel as
+CrossEntropy (wU ,k, ˆξ), ˆξ := (ψ(ξ), ˆyξ(β)) (5)
+where ψ(·) is a strong-augumentation (RandAugment [41]) of the data sampleξ with its hyperparameters set
+to (1, 10).
+3) Global-Local Consistency Regularization.The cross-entropy loss ofFedLabel in (5) uses the
+pseudo-label selected via a binary selection between the local and global model which essentially discards the
+logits of the model that has not been selected. However, there can be cases where the discarded model’s
+soft logits which we denote ass−∗(ξ) also point to the same labelˆyξ, i.e., arg maxi∈[N ] s−∗(ξ) = ˆyξ(β) as
+the selected model. In such cases with only the cross-entropy term in (5),FedLabel can lose the useful
+information contained in the discarded model. To cover such scenarios,FedLabel utilizes the knowledge
+of the discarded model when it predicts the same label as the selected model by our proposed global-local
+consistency regularizing term as follows:
+λk(ξ)KL(s(wU ,k, ξ), s−∗(ξ))1 (arg max
+i∈[N ]
+s−∗(ξ) = ˆyξ(β)), (6)
+where λk(ξ) := λ0h(s−∗(ξ))/h(s∗(ξ)) (7)
+Note that the global-local consistency regularizing term (KL-divergence) is weighed byλk(ξ) which is the
+confidence-score ratio by the discarded model to the selected model, i.e.,λ0h(s−∗(ξ))/h(s∗(ξ)) ≤ λ0, so
+that the less confident the discarded model is compared to the selected model, the lower the regularization
+weight. The maximum value ofλk(ξ), ξ ∈ D U ,k, ∀k ∈ [M] is λ0 which is achieved when the confidence score
+of the discarded model and the selected model is identical. We show in Section 5.2 that this consistency
+regularization term indeed helpsFedLabel improve its performance from at least5% to at most9%.
+FedLabel’s Final Semi-supervised Loss.Combining the cross-entropy loss from the confidence-based
+selection in (5) and the global-local consistency regularization loss in (6), we have the final semi-supervised
+7Algorithm 1 FedLabel Framework
+1: Initialize w(0,0), Output: Global model w(T,0),
+2: For t = 0, ..., T − 1 communication rounds do:
+3: Global server: Select m clients for C(t,0) uniformly at random and sendw(t,0) to clients inC(t,0)
+4: Clients k ∈ C (t,0) in parallel do:
+5: Set w(t,0)
+L,k = w(t,0), w(t,0)
+U ,k = w(t,0)
+6: Get w(t,τ )
+L,k = ∆w(t,0)
+L,k + w(t,0)
+L,k (See (2))
+7: Get ∆w(t,0)
+U ,k (See (10)
+8: Send ∆w(t,0)
+k = ∆w(t,0)
+L,k + ∆w(t,0)
+U ,k and aggregation weightr(t,0)
+k to the server
+9: Global server:Update w(t+1,0) = w(t,0) + P
+k∈C(t,0)
+r(t,0)
+kP
+k′ ∈C(t,0) r(t,0)
+k′
+∆w(t,0)
+k
+loss of FedLabel denoted as FU ,k(w) for each clientk ∈ [M] as below:
+FU ,k(wU ,k) = 1
+|DU ,k|
+X
+ξ∈DU ,k
+(CrossEntropy (wU ,k, ˆξ)
++λk(ξ)KL(s(wU ,k, ξ), s−∗(ξ))1 (arg max
+i∈[N ]
+s−∗(ξ)= ˆyξ(β)))
+(8)
+With the final semi-supervised loss ofFedLabel proposed in (8), now we are ready to elaborate on how
+FedLabel is implemented in the subsequent subsection.
+4.2 FedLabel Implementation
+Recall that at each communication roundt, the selected set of clientsC(t,0) initialize their local model to
+the global model, i.e.,w(t,0)
+L,k = w(t,0) and perform τ local iterations to obtain the supervised local update
+∆w(t,0)
+L,k (see (2)). Using the same initializationw(t,0)
+U ,k := w(t,0), the clients now obtain the semi-supervised
+local update by minimizing the semi-supervised lossFU ,k(wU ,k) (see (8)) via mini-batch SGD forτ ′ iterations
+on the unlabeled dataDU ,k, k ∈ C (t,0). Concretely, we have the semi-supervised local update as:
+(Perform Local SGD onUnlabeled Data)
+w(t,τ )
+U ,k = w(t,0)
+U ,k − η
+τ ′−1X
+l=0
+∇FU ,k(w(t,l)
+U ,k , ξ(t,l)
+U ,k ) (9)
+(Compute theSemi-supervised Local Update)
+∆w(t,0)
+U ,k = w(t,τ )
+U ,k − w(t,0)
+U ,k (10)
+where ∇FU ,k(w(t,l)
+U ,k , ξ(t,l)
+U ,k ) = 1
+b
+P
+ξ∈ξ(t,l)
+U ,k
+∇f(w(t,l)
+U ,k , ξ) is the stochastic gradient computed using a mini-batch
+ξ(t,l)
+U ,k of sizeb that is randomly sampled from clientk’s local unlabeled datasetDU,k. Now each clientk ∈ C (t,0)
+sends back its update∆w(t,0)
+k = ∆w(t,0)
+L,k + ∆w(t,0)
+U ,k back to the server along with the total number of data
+samples r(t,0)
+k used for obtaining the local updates∆w(t,0)
+L,k and ∆w(t,0)
+U ,k . Note that r(t,0)
+k is dependent on
+t because the number of unlabeled data samples that are used for training varies for each communication
+round depending on how many samples pass the confidence-based threshold in (4). Then finally the server
+updates its global model asw(t+1,0) = w(t,0) + P
+k∈C(t,0)
+r(t,0)
+kP
+k′ ∈C(t,0) r(t,0)
+k′
+∆w(t,0)
+k . The details ofFedLabel’s
+implementation is in Algorithm 1.
+85 Experiments
+5.1 Experimental Setup
+We perform experiments on a wide variety of experiments onboth cross-device and cross-silo settings,
+partial and full client participation, low and high data heterogeneity, and low and large label
+scarcity. We perform 3 tasks for cross-device: Resnet18 with EMNIST (62 labels) [42], Resnet34 with
+CIFAR10 (10 labels), and Resnet50 with CIFAR100 (100 labels) [43] and 2 tasks for cross-silo: OrganAMNIST
+(11 labels) and BloodMNIST (8 labels) [44] both with Resnet18. For cross-device, we select10% of clients for
+training for each comm. round. For the OrganAMNIST and BloodMNIST we select30% and 100% of clients.
+Data Partitioning Across Clients.For cross-device, the data is partitioned across 100 clients using the
+Dirichlet distributionDir(α = 0.1) [45], unless mentioned otherwise. The parameterα determines the degree
+of data heterogeneity (smallerα indicates larger data heterogeneity). For cross-silo, data is partitioned across
+10 and 5 clients in total respectively withα = 0.1, unless mentioned otherwise. Note that we emulate a
+realistic setting where the total number of clients is much smaller for cross-silo than for cross-device.
+Data Partitioning Within Clients.The local training dataset of each client is partitioned into labeled
+and unlabeled data uniformly at random. Note that even without artificially biasing the dataset partitioning,
+we were still able to observe class-distribution mismatch for high label scarcity (see Fig. 2). For cross-device,
+we have20% : 80% and 50% : 50% partitioning of the labeled : unlabeled data for each client’s local training
+data. For cross-silo, we have5% : 95% and 20% : 80% partitioning. Note that we have run more fine-grained
+data ratio experiments (10,20,50,65 for CIFAR10, and 5,20,35,50 for OrganAMNIST), also shown in Fig. 1,
+but have selected a few intervals that have shown the most significant difference for presentation.
+Baselines. We compare FedLabel with 3 classes of baselines: i) Supervised FL baselines with Fully
+Labeled Data denoted as100% (FedAvg (100%) [1], FedProx (100%) [17]), ii) Supervised FL baselines
+with Partially Labeled Data (FedAvg, FedProx), and iii) SSFL baselines [13, 14] with Partially Labeled
+Data ((FedAvg+UDA, FedAvg+FixMatch, FedProx+UDA, FedProx+FixMatch, FedTriNet [8],
+FedMatch [23]). The i) supervised FL baselines with100% of labeled data is the hypotheticalupper bound
+that we can achieve by using FL when clients have all their data labeled, and ii) the supervised FL baselines
+with partially labeled data is thelower boundthat FL actually achieves in a realistic setting with only a few
+labeled data. The iii) SSFL baselines are the state-of-the-art methods that tackle label scarcity in FL. We do
+not compare with SemiFL [25] and Rscfed [8] which impose assumptions such as the server having labeled
+data or several clients having fully labeled data (see Table 2).
+5.2 Experimental Results
+We thoroughly evaluateFedLabel in the following aspects: achieves high accuracy for i) both low and high
+label scarcity (5-20% and 20-50%), and ii) both low and high data heterogeneity. We also perform ablation
+studies on FedLabel as follows: iii) effect of the global-local consistency regularizing term modulated byλ0
+in (7), iv) effect of the number of local stepsτ to obtain the local model in (1), v) effect of the thresholding
+parameter β in (4), and vi) effect of different confidence measuresh(·) in (3). We defer the results for v) and
+vi) to Appendix A due to space constraints.
+Effectiveness of FedLabel for High Label Scarcity.We evaluate FedLabel with the top-1 test
+accuracies for 20% and 5% of labeled data on each client for cross-device and cross-silo respectively in
+Table 3. Compared to the other SSFL baselines,FedLabel achieves a higher test accuracy by8-16%, 15-
+24%, 8%, 14-20%, and 12-23% for EMNIST, CIFAR10, CIFAR100, OrganAMNIST, and BloodMNIST
+9High Client
+Data Heterogeneity
+Cross-Device Setting Cross-Silo Setting
+EMNIST CIFAR10 CIFAR100 OrganAMNIST BloodMNIST
+Supervised, FedAvg ( 100%) 78.36 (±0.73) 44.67 (±1.09) 24.67 (±0.55) 71.09 (±1.00) 70.53 (±1.13)
+Fully Labeled FedProx ( 100%) 78.60 (±0.89) 44.72 (±1.63) 24.87 (±0.19) 73.34 (±0.86) 74.53 (±0.39)
+Supervised, FedAvg 63.05 (±1.52) 28.83 (±2.94) 11.33 (±0.22) 41.90 (±2.18) 53.18 (±0.11)
+Partially Labeled FedProx 63.31 (±0.16) 31.09 (±1.15) 11.37 (±0.15) 48.28 (±0.78) 56.53 (±0.68)
+Semi-Supervised,
+Partially Labeled
+FedAvg+UDA 68.98 (±1.06) 31.32 (±2.84) 10.80 (±0.57) 55.14 (±0.92) 53.18 (±0.68)
+FedAvg+FixMatch 67.98 (±1.59) 23.99 (±2.73) 10.16 (±0.20) 52.76 (±2.95) 47.92 (±1.55)
+FedProx+UDA 71.93 (±1.37) 31.99 (±2.26) 10.57 (±0.13) 54.15 (±2.53) 59.48 (±1.17)
+FedProx+FixMatch 70.56 (±0.96) 22.38 (±2.28) 10.02 (±0.54) 55.49 (±2.65) 50.88 (±1.12)
+FedTriNet 60.31 (±0.25) 29.56 (±1.53) 10.53 (±1.83) 50.82 (±1.21) 59.38 (±1.05)
+FedMatch 63.48 (±0.57) 31.94 (±1.78) 10.86 (±1.33) 48.99 (±1.38) 58.89 (±2.24)
+FedLabel (ours) 79.33 (±1.97) 46.05 (±1.09) 18.42 (±1.46) 69.43 (±1.58) 71.46 (±1.89)
+Table 3: Test accuracy for high label scarcity on each client’s local data (20% of labeled data for cross-device
+and 5% for cross-silo). FedLabel achieves a significantly higher test accuracy by approximately8-16%, 15-
+24%, 8%, 14-20%, and 12-23% for EMNIST, CIFAR10, CIFAR100, OrganAMNIST, and BloodMNIST
+respectively. For EMNIST, CIFAR10, and BloodMNIST,FedLabel achieves an even higher test accuracy
+than the supervised fully labeled case (100% of the data labeled) by approximately1%, 2%, and 1%.
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+7HVW$FFXUDF\
+1RQ6HPLVXSHUYLVHG%DVHOLQHV
+)HG$YJ
+)HG3UR[
+)HG$YJ
+)HG3UR[
+)HG/DEHO
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+7HVW$FFXUDF\
+6HPLVXSHUYLVHG%DVHOLQHV
+)HG$YJ8'$
+)HG$YJ)L[0DWFK
+)HG3UR[)L[0DWFK
+)HG3UR[8'$
+)HG0DWFK
+)HG/DEHO
+(a) 50% of Labeled Data for CIFAR10
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+
+
+
+7HVW$FFXUDF\
+1RQ6HPLVXSHUYLVHG%DVHOLQHV
+)HG$YJ
+)HG3UR[
+)HG$YJ
+)HG3UR[
+)HG/DEHO
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+
+
+
+7HVW$FFXUDF\
+6HPLVXSHUYLVHG%DVHOLQHV
+)HG$YJ8'$
+)HG$YJ)L[0DWFK
+)HG3UR[)L[0DWFK
+)HG3UR[8'$
+)HG0DWFK
+)HG/DEHO (b) 20% of Labeled Data for OrganAMNIST
+Figure 4: Test accuracy for lower label scarcity,50% and 20% of labeled data, for each client’s local training
+data for CIFAR10 and OrganAMNIST respectively.FedLabel outperforms the baselines by8-15% and 2-10%
+for CIFAR10 and OrganAMNIST respectively. Comparing to results in Table 3,FedLabel performance gap
+with other baselines is higher when there is higher label scarcity.
+respectively. Surprisingly, for EMNIST, CIFAR10, and BloodMNIST,FedLabel achieves an even higher
+test accuracy than the fully supervised case(100% of labeled data) by approximately1%, 2%, and 1%.
+In other words,FedLabel performs even better than the ideal scenario when100% of the data is labeled,
+with only 5-20% of labeled data. We reason that this is due to the small amount of noise introduced by
+FedLabel when leveraging the unlabeled data which can improve the generalization performance as shown in
+previous work [46, 47]. FedLabel’s also outperforms by7-27% than the supervised baselines with partially
+labeled data, while some of the SSFL baselines with partially labeled data perform even worse. Next, we
+evaluate FedLabel when there are more labels in the subsequent paragraph.
+Comparison with Cases for Lower Label Scarcity.In Fig. 4, we show results for larger portions of
+labeled data, 50% for CIFAR10 and20% for OrganAMNIST, than the results shown in Table 3 which was for
+20% and 5% of labeled data respectively. For the larger number of labeled data,FedLabel still outperforms
+the baselines by8-15% and 2-10% for CIFAR10 and OrganAMNIST respectively. However, the performance
+gap is lower than the15-24% and 14-20% improvement shown in Table 3 for higher label scarcity. Hence,
+this shows that whileFedLabel still outperforms other baselines for lower label scarcity, it outperforms the
+other baselines with a higher gap when clients have a smaller number of labels, i.e., high label scarcity.
+100 200 400 600 800
+Communication Rounds
+10
+15
+20
+25
+30
+35
+40
+45
+50Test Accuracy
+λ0 = 0.0
+λ0 = 0.5
+λ0 = 1.0
+λ0 = 2.0
+(a) CIFAR10
+0 500 1000 1500 2000
+Communication Rounds
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+15.0
+17.5
+20.0Test Accuracy
+λ0 = 0.0
+λ0 = 0.5
+λ0 = 1.0
+λ0 = 2.0 (b) CIFAR100
+0 200 400 600 800
+Communication Rounds
+10
+20
+30
+40
+50
+60
+70Test Accuracy
+λ0 = 0.0
+λ0 = 1.0
+λ0 = 2.0
+λ0 = 3.0 (c) OrganAMNIST
+0 50 100 150
+Communication Rounds
+10
+20
+30
+40
+50
+60
+70Test Accuracy
+λ0 = 0.0
+λ0 = 1.0
+λ0 = 3.0
+λ0 = 4.0
+λ0 = 5.0 (d) BloodMNIST
+Figure 5: Ablation study on the effect of the global-local consistency regularizing term by modulatingλ0
+in (7). For all datasets,λ0 = 0 gives the lowest test accuracy, showing that without the regularizing term,
+we lose useful information from the discarded model from the binary selection between the local and global
+model. For largerλ0 > 0, the test accuracy improves by approximately5-9%.
+Low Inter-Client CIFAR10 OrganAMNISTData Heterogeneity
+FedAvg (100%) 57.17 (±0.34) 81.49 (±0.96)
+FedProx (100%) 57.45 (±0.51) 82.07 (±1.10)
+FedAvg 40.11 (±0.67) 59.74 (±1.52)
+FedProx 41.45 (±0.58) 61.86 (±1.23)
+FedAvg+UDA 42.07 (±0.94) 63.05 (±1.91)
+FedAvg+FixMatch 38.51 (±0.96) 70.14 (±1.42)
+FedProx+UDA 42.08 (±0.83) 65.12 (±2.03)
+FedProx+FixMatch 42.94 (±0.86) 70.58 (±1.13)
+FedTriNet 42.67 (±0.79) 74.16 (±1.42)
+FedMatch 44.23 (±0.88) 72.57 (±1.58)
+FedLabel (ours) 48.89 (±0.91) 79.76 (±0.83)
+Table 4: Test accuracy for labeled data20% and
+5% respectively for CIFAR10 and OrganAMNIST
+with lower data heterogeneity (α = 1). FedLa-
+bel outperforms the baselines by4-10% and 7-20%
+for CIFAR10 and OrganAMNIST respectively.
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+
+
+
+7HVW$FFXUDF\
+͘ 
+͘ 
+͘ 
+͘ 
+͘ 
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+
+
+
+7HVW$FFXUDF\
+͘ 
+͘ 
+͘ 
+͘ 
+͘ 
+(a) CIFAR10 (b) OrganAMNIST
+Figure 6: Ablation study on the number of local steps
+τ to obtain the local modelwL,k for client k ∈ [M].
+The smallest τ = 5 yields the worst performance
+showing that for the local model to well reflect the
+client’s local data,τ needs to be moderately large.
+Robustness of FedLabel to Data Heterogeneity.In Table 4, we show the test accuracy for smaller
+data heterogeneity (α = 1) where FedLabel still outperforms the other baselines by4-10% and 7-20% for
+CIFAR10 and OrganAMNIST respectively. However, compared to the results in Table 3 which is for higher
+data heterogeneity (α = 0.1), the performance gap betweenFedLabel and the other baselines is smaller by
+around 11-14%. This implies thatFedLabel works better when there is high data heterogeneity, while the
+other baselines perform worse when there is higher data heterogeneity across clients.
+Effect of Global-Local Consistency Regularization.In FedLabel, we use global-local consistency
+regularization which is weighted by the parameterλ0 (see (7)). We evaluate the effectiveness of this term
+by varying λ0 in Fig. 5. For all datasets,λ0 = 0 gives the lowest test accuracy, showing that without the
+regularizing term, we are losing useful information from the discarded model due to the binary selection
+between the local and global model. As we increaseλ0, we see significant improvement in the test accuracy
+of 5-9%. However, we also observe that whenλ0 exceeds a certain threshold the improvement decreases. The
+intensity of the global-local consistency regularizing term can be modulated by tuningλ0 when appropriate.
+11Number of Training Steps to Obtain the Local Model.To obtain the local model (see Eq. (1)),
+clients perform τ local SGD steps on the received global model with their labeled data. Hence, with larger
+τ, the more the local model well reflects the client’s local data. In Fig. 6, we perform an ablation study on
+the effect ofτ. The smallest τ = 5 yields the worst performance showing that for the local model to well
+reflect the client’s local data and bring distinct information from the global model,τ needs to be set to a
+moderately large value. For largerτ, the performance improves and gradually saturates indicating that the
+local model converges. We provide additional results on the effect ofτ for a larger number of labeled data in
+Appendix A, giving further insight into how the quality of the local model affectsFedLabel’s performance.
+  
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+7HVW$FFXUDF\:LWKRXW6WURQJ$XJ
+:LWK6WURQJ$XJ
+  
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+7HVW$FFXUDF\:LWKRXW6WURQJ$XJ
+:LWK6WURQJ$XJ
+  
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+7HVW$FFXUDF\:LWKRXW6WURQJ$XJ
+:LWK6WURQJ$XJ
+(a)	𝛽=0.2(b)	𝛽=0.5(c)	𝛽=0.8
+Figure 7: FedLabel with or without strong-
+augumentation for CIFAR10 with varying threshold
+values β.
+Effect of Strong-Augumentation. In FedLa-
+bel’s augumentation process, we use RandAug. [3]
+which randomly selects 10 of the following trans-
+formations: [’Identity’, ’AutoContrast’, ’Equalize’,
+’Rotate’, ’Solarize’, ’Color’, ’Posterize’, ’Contrast’,
+’Brightness’, ’Sharpness’, ’Shear-X’, ’-Y’, ’Translate-
+X’, or ’-Y’] and applies them with magnitude 1. This
+acts as a regularizer, preventing the model from over-
+fitting to the fixed set of unlabeled data, as also
+shown in Fig. 7 for different thresholdβ values.
+(Per comm. round & client) FedTriNet FedMatch FedLabel
+Forward+Backward Pass 3P + 2B (h + 1)P + 2B 2P + 2B
+Additonal Server Comp. Thresholding Clustering ( ∝ h) None
+Comm. Cost 2R (2 + h)R 2R
+Comp. Time (sec) 7.81(±0.16) 11.24(±0.21) 3.76(±0.04)
+Table 5: Computation & communication cost comparison for
+different semi-supervised FL methods.
+Computation Cost of FedLabel.
+We further investigateFedLabel’s com-
+putationefficacyinTable5. Assumingthe
+same number of local updates and batch
+sizes across all baselines for fair compar-
+ison, and setting the # of model params
+as R, # of helper clients ash = 2 > 1 for
+FedMatch, computation cost for a model’s
+single forward & backprop. as P & B.
+The actual time taken per computation step for each client plus any additional computations taken at the
+server side is presented whereFedLabel incurs significantly smaller computation time. Costs for sending
+constants such as the max-probability for FedTriNet, and weights forFedLabel & FedMatch are considered
+negligible.
+6 Concluding Remarks
+In conclusion, we propose FedLabel, a SSFL framework that works well for both low and high data
+heterogeneity cases, as well as for both limited and larger portions of labeled data. We use a confidence-based
+binary selection of the local or global model for pseudo-labeling with global-local consistency regularization.
+Unlike previous work,FedLabel does not require additional computation to find new experts, additional
+communication of parameters, server labeled data, or any fully labeled clients. In both cross-device and
+cross-silo settings, we show thatFedLabel largely outperforms other SSFL baselines, especially when there is
+high data heterogeneity and label scarcity, by at most24%. FedLabel even outperforms fully-supervised FL
+baselines which use fully-labeled data with only using5-20% of labeled data. Currently,FedLabel does not
+consider the possible noise that can be present in the labeled data of the clients caused, for instance, clients
+mislabeling their data due to lack of expertise. Thus, for future work, we aim to extend theFedLabel to be
+robust to label noise.
+12References
+[1] H. Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Agøura y Arcas.
+Communication-Efficient Learning of Deep Networks from Decentralized Data.International Conference
+on Artificial Intelligenece and Statistics (AISTATS), April 2017. 1, 3, 5, 6, 9
+[2] Peter Kairouz, H. Brendan McMahan, Brendan Avent, Aurelien Bellet, Mehdi Bennis, Arjun Nitin
+Bhagoji, Keith Bonawitz, Zachary Charles, Graham Cormode, Rachel Cummings, Rafael G. L. D’Oliveira,
+Salim El Rouayheb, David Evans, Josh Gardner, Zachary Garrett, Adria Gascon, Badih Ghazi, Phillip B.
+Gibbons, Marco Gruteser, Zaid Harchaoui, Chaoyang He, Lie He, Zhouyuan Huo, Ben Hutchinson,
+Justin Hsu, Martin Jaggi, Tara Javidi, Gauri Joshi, Mikhail Khodak, Jakub Konecny, Aleksandra
+Korolova, Farinaz Koushanfar, Sanmi Koyejo, Tancrede Lepoint, Yang Liu, Prateek Mittal, Mehryar
+Mohri, Richard Nock, Ayfer Ozgur, Rasmus Pagh, Mariana Raykova, Hang Qi, Daniel Ramage, Ramesh
+Raskar, Dawn Song, Weikang Song, Sebastian U. Stich, Ziteng Sun, Ananda Theertha Suresh, Florian
+Tramer, Praneeth Vepakomma, Jianyu Wang, Li Xiong, Zheng Xu, Qiang Yang, Felix X. Yu, Han Yu,
+and Sen Zhao. Advances and open problems in federated learning.arXiv preprint arXiv:1912.04977,
+2019. 1
+[3] Jianyu Wang, Zachary Charles, Zheng Xu, Gauri Joshi, H Brendan McMahan, Maruan Al-Shedivat,
+Galen Andrew, Salman Avestimehr, Katharine Daly, Deepesh Data, et al. A field guide to federated
+optimization. arXiv preprint arXiv:2107.06917, 2021. 1
+[4] Wenti Yang, Naiyu Wang, Zhitao Guan, Longfei Wu, Xiaojiang Du, and Mohsen Guizani. A practical
+cross-device federated learning framework over 5g networks. InProceedings of the IEEE Wireless
+Communications, 2022. 1
+[5] Adam Sadilek, Luyang Liu, Dung Nguyen, Methun Kamruzzaman, Benjamin Rader, Alex Ingerman,
+Stefan Mellem, Peter Kairouz, Elaine O. Nsoesie, Jamie MacFarlane, Anil Vullikanti, Madhav Marathe,
+Paul Eastham, John S. Brownstein, Michael Howell, and John Hernandez1. Privacy-first health research
+with federated learning. Innpj Digital Medicine, 2021. 1
+[6] Chaoyang He, Zhengyu Yang, Erum Mushtaq, Sunwoo Lee, Mahdi Soltanolkotabi, and Salman Avestimehr.
+SSFL: Tackling Label Deficiency in Federated Learning via Personalized Self-Supervision.preprint, 2021.
+1, 4
+[7] Chenyou Fan, Junjie Hu, and Jianwei Huang. Private Semi-Supervised Federated Learning. InProceedings
+of the Thirty-First International Joint Conference on Artificial Intelligence (IJCAI-22), 2022. 1
+[8] Liwei Che, Zewei Long, Jiaqi Wang, Yaqing Wang, Houping Xiao, and Fenglong Ma. Fedtrinet: A pseudo
+labeling method with three players for federated semi-supervised learning. In2021 IEEE International
+Conference on Big Data (Big Data), pages 715–724, 2021. 1, 3, 4, 9
+[9] Woojung Kim, Keondo Park, Kihyuk Sohn, Raphael Shu, and Hyung-Sin Kim. Federated semi-supervised
+learning with prototypical networks.arXiv preprint arXiv:2205.13921, 2022. 1
+[10] Jonathan Scott, Michelle Yeo, and Christoph H. Lampert. Fedprop: Cross-client label propagation for
+federated semi-supervised learning.arXiv preprint arXiv:2210.06434, 2022. 1
+[11] M. Humbert-Droz, P. Mukherjee, and O. Gevaert. Strategies to address the lack of labeled data for
+supervised machine learning training with electronic health records: Case study for the extraction of
+symptoms from clinical notes.JMIR Med Inform, 10(3), 2022. 1
+[12] Zhongyi Han, Benzheng Wei, Yanfei Hong, Tianyang Li, Jinyu Cong, Xue Zhu, Haifeng Wei, and Wei
+Zhang. Accurate screening of covid-19 using attention-based deep 3d multiple instance learning.IEEE
+Transactions on Medical Imaging, 39(8):2584–2594, 2020. 1
+13[13] Qizhe Xie, Zihang Dai, Eduard Hovy, Minh-Thang Luong, and Quoc V. Le. Unsupervised data
+augmentation for consistency training. InAdvances in Neural Information Processing Systems, 2020. 2,
+4, 9
+[14] Kihyuk Sohn, David Berthelot, Chun-Liang Li, Zizhao Zhang, Nicholas Carlini, Ekin D. Cubuk, Alex
+Kurakin, HanZhang, andColinRaffel. FixMatch: SimplifyingSemi-SupervisedLearningwithConsistency
+and Confidence. InAdvances in Neural Information Processing Systems (NeurIPS), 2020. 2, 4, 9, 17
+[15] Z. Zhao, L. Zhou, Y. Duan, L. Wang, L. Qi, and Y. Shi. Dc-ssl: Addressing mismatched class distribution
+in semi-supervised learning. InIn IEEE Conf. on Computer Vision and Pattern Recognition (CVPR),
+2022. 2
+[16] Y. Chen, X. Zhu, W. Li, and S. Gong. Semi-supervised learning under class distribution mismatch. In
+In The Thirty-Fourth AAAI Conference on Artificial Intelligence (AAAI), 2020. 2
+[17] Anit Kumar Sahu, Tian Li, Maziar Sanjabi, Manzil Zaheer, Ameet Talwalkar, and Virginia Smith.
+Federated optimization for heterogeneous networks. InProceedings of the 3rd MLSys Conference, January
+2020. 2, 3, 6, 9
+[18] Sashank Reddi, Zachary Charles, Manzil Zaheer, Zachary Garrett, Keith Rush, Jakub Konečn` y, Sanjiv
+Kumar, and H Brendan McMahan. Adaptive federated optimization. InInternational Conference on
+Learning Representations (ICLR), 2021. 2, 4
+[19] Farzin Haddadpour and Mehrdad Mahdavi. On the convergence of local descent methods in federated
+learning. arXiv preprint arXiv:1910.14425, 2019. 2
+[20] Grigory Malinovsky, Dmitry Kovalev, Elnur Gasanov, Laurent Condat, and Peter Richtárik. From
+local SGD to local fixed point methods for federated learning. InProceedings of the 37th International
+Conference on Machine Learning, 2020. 2
+[21] A Khaled, K Mishchenko, and P Richtárik. Tighter theory for local SGD on identical and heterogeneous
+data. In The 23rd International Conference on Artificial Intelligence and Statistics (AISTATS 2020),
+2020. 2
+[22] Jianyu Wang, Qinghua Liu, Hao Liang, Gauri Joshi, and H. Vincent Poor. Tackling the Objective
+Inconsistency Problem in Heterogeneous Federated Optimization.preprint, May 2020. 2
+[23] Wonyong Jeong, Jaehong Yoon, Eunho Yang, and Sung Ju Hwang. Federated semi-supervised learning
+with inter-client consistency & disjoint learning. InInternational Conference on Learning Representations
+(ICLR), 2021. 3, 4, 9
+[24] Chuhan Wu, Fangzhao Wu, Lingjuan Lyu, Yongfeng Huang, and Xing Xie. Communication-efficient
+federated learning via knowledge distillation.Nature Communications, 13(1):2032, 2022. 3
+[25] Enmao Diao, Jie Ding, and Vahid Tarokh. SemiFL: Semi-Supervised Federated Learning for Unlabeled
+Clients with Alternate Training. InAdvances in Neural Information Processing Systems, 2022. 3, 4, 9
+[26] Xiaoxiao Liang, Yiqun Lin, Huazhu Fu, Lei Zhu, and Xiaomeng Li1. Rscfed: Random sampling consensus
+federated semi-supervised learning. InIn IEEE Conf. on Computer Vision and Pattern Recognition
+(CVPR), 2022. 3, 4
+[27] Nan Lu, Zhao Wang, Xiaoxiao Li, Gang Niu, Qi Dou, and Masashi Sugiyama. Federated learning
+from only unlabeled data with class-conditional-sharing clients.International Conference on Learning
+Representations (ICLR), 2022. 4
+[28] Xinyang Lin, , Hanting Chen, Yixing Xu, Chao Xu, Xiaolin Gui, Yiping Deng, and Yunhe Wang.
+Federated Learning with Positive and Unlabeled Data.preprint, 2021. 4
+14[29] Aron Culotta and Andrew McCallum. Reducing labeling effort for structured prediction tasks. InAAAI
+Conference on Artificial Intelligence (AAAI), 2005. 4
+[30] Yuji Roh, Geon Heo, and Steven Euijong Whang. A survey on data collection for machine learning:
+A big data - ai integration perspective. IEEE Transactions on Knowledge and Data Engineering,
+33(4):1328–1347, 2021. 4
+[31] Joseph Chee Chang, Saleema Amershi, and Ece Kamar. Revolt: Collaborative crowdsourcing for labeling
+machine learning datasets. InCHI ’17, page 2334–2346, New York, NY, USA, 2017. Association for
+Computing Machinery. 4
+[32] Jisoo Jeong, Seungeui Lee, Jeesoo Kim, and Nojun Kwak. Consistency-based Semi-supervised Learning
+for Object Detection. InAdvances in Neural Information Processing Systems (NeurIPS), 2019. 4
+[33] Vikas Verma, Alex Lamb, Juho Kannala, Yoshua Bengio, and David Lopez-Paz. Interpolation Consistency
+Training for Semi-supervised Learning. In International Joint Conference on Artificial Intelligence
+(IJCAI), 2019. 4
+[34] Bowen Zhang, Yidong Wang, Wenxin Hou, Hao Wu, Jindong Wang, Manabu Okumura, and Takahiro
+Shinozaki. FlexMatch: Boosting Semi-Supervised Learning with Curriculum Pseudo Labeling. In
+Advances in Neural Information Processing Systems (NeurIPS), 2021. 4
+[35] Yi Xu, Lei Shang, Jinxing Ye, Qi Qian, Yu-Feng Li, Baigui Sun, Hao Li, and Rong Jin. Dash: Semi-
+Supervised Learning with Dynamic Thresholding. InInternational Conference on Machine Learning
+(ICML), 2021. 4
+[36] Takeru Miyato, Shin ichi Maeda, Masanori Koyama, and Shin Ishii. Virtual adversarial training: A
+regularization method for supervised and semi-supervised learning.IEEE Transactions on Pattern
+Analysis and Machine Intelligence, 2019. 4
+[37] Zhongzheng Ren, Raymond A. Yeh, and Alexander G. Schwing. Not All Unlabeled Data are Equal:
+Learning to Weight Data in Semi-supervised Learning. InAdvances in Neural Information Processing
+Systems (NeurIPS), 2020. 4
+[38] Binghui Wang, Ang Li, Hai Li, and Yiran Chen. GraphFL: A Federated Learning Framework for
+Semi-Supervised Node Classification on Graphs.preprint, 2020. 4
+[39] Sai Praneeth Karimireddy, Satyen Kale, Mehryar Mohri, Sashank J Reddi, Sebastian U Stich, and
+Ananda Theertha Suresh. SCAFFOLD: Stochastic controlled averaging for on-device federated learning.
+arXiv preprint arXiv:1910.06378, 2019. 4
+[40] Yae Jee Cho, Andre Manoel, Gauri Joshi, Robert Sim, and Dimitrios Dimitriadis. Heterogeneous
+ensemble knowledge transfer for training large models in federated learning. InProceedings of the
+Thirtieth International Joint Conference on Artificial Intelligence (IJCAI-22), 2022. 7
+[41] Ekin D. Cubuk, Barret Zoph, Jonathon Shlens, and Quoc V. Le. Randaugment: Practical automated
+data augmentation with a reduced search space.arXiv preprint arXiv:1909.13719, 2019. 7
+[42] Gregory Cohen, Saeed Afshar, Jonathan Tapson, and André van Schaik. EMNIST: an extension of
+MNIST to handwritten letters.arXiv preprint arXiv:1702.05373, 2017. 9
+[43] Alex Krizhevsky, Vinod Nair, and Geoffrey Hinton. Learning multiple layers of features from tiny images.
+CIFAR-10 (Canadian Institute for Advanced Research), 2009. 9
+[44] Jiancheng Yang, Rui Shi, Donglai Wei, Zequan Liu, Lin Zhao, Bilian Ke, Hanspeter Pfister, and Bingbing
+Ni. Medmnist v2: A large-scale lightweight benchmark for 2d and 3d biomedical image classification.
+arXiv preprint arXiv:2110.14795, 2021. 9
+15[45] Tzu-Ming Harry Hsu, Hang Qi, and Matthew Brown. Measuring the effects of non-identical data
+distribution for federated visual classification. InInternational Workshop on Federated Learning for User
+Privacy and Data Confidentiality in Conjunction with NeurIPS 2019 (FL-NeurIPS’19), December 2019.
+9
+[46] Xingrui Yu, Bo Han, Jiangchao Yao, Gang Niu, , Ivor W. Tsang, and Masashi Sugiyama. How does
+disagreement help generalization against label corruption? InProceedings of the International Conference
+on Machine Learning (ICML), 2019. 10
+[47] Xian-Jin Gui, Wei Wang, and Zhang-Hao Tian. Towards understanding deep learning from noisy labels
+with small-loss criterion. InProceedings of the Thirtieth International Joint Conference on Artificial
+Intelligence (IJCAI-21), 2021. 10
+16A Additional Experimental Results
+0 200 400 600 800 1000
+Communication Rounds
+10
+15
+20
+25
+30
+35
+40
+45
+50Test Accuracy
+β = 0.9
+β = 0.7
+β = 0.5
+β = 0.3
+β = 0.2
+(a) CIFAR10
+0 500 1000 1500 2000
+Communication Rounds
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+15.0
+17.5
+20.0Test Accuracy
+β = 0.9
+β = 0.7
+β = 0.5
+β = 0.3
+β = 0.2 (b) CIFAR100
+0 200 400 600 800 1000
+Communication Rounds
+10
+20
+30
+40
+50
+60
+70Test Accuracy
+β = 0.9
+β = 0.7
+β = 0.5
+β = 0.4 (c) OrganAMNIST
+0 50 100 150 200 250 300
+Communication Rounds
+20
+30
+40
+50
+60
+70Test Accuracy
+β = 0.9
+β = 0.7
+β = 0.5
+β = 0.4
+β = 0.1 (d) BloodMNIST
+Figure 8: Ablation study ofFedLabel’s performance on the thresholding parameter (0 ≤ β ≤ 1 in (4)). For
+all the datasets, the performance ofFedLabel is the lowest for the highestβ = 0.9 meaning that for a too
+high β parameter, FedLabel filters out too much unlabeled data that the model is not able to learn much.
+FedLabel achieves the best performance for a lowerβ of the range0.3 ∼ 0.5.
+0 200 400 600 800 1000
+Communication Rounds
+10
+15
+20
+25
+30
+35
+40
+45
+50
+55Test Accuracy
+ent
+var
+(a) CIFAR10
+0 500 1000 1500 2000
+Communication Rounds
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+15.0
+17.5
+20.0Test Accuracy
+ent
+var (b) CIFAR100
+0 200 400 600 800 1000
+Communication Rounds
+20
+30
+40
+50
+60
+70Test Accuracy
+ent
+var (c) OrganAMNIST
+0 50 100 150 200 250 300
+Communication Rounds
+20
+30
+40
+50
+60
+70Test Accuracy
+ent
+var (d) BloodMNIST
+Figure 9: FedLabel’s performance with different confidence metrics (h(·) in (4)), variance and entropy. For
+CIFAR10 and CIFAR100 both entropy and variance perform similarly. However, for OrganAMNIST and
+BloodMNIST variance performs better than entropy showing that it can better judge the confidence of the
+models than entropy.
+For all datasets,80% is for training partitioned across clients and the5%, 15% of the data is for the validation
+and test respectively. We experiment with 3 different seeds for the randomness in the dataset partition across
+clients and present the averaged results.
+Ablation Study on Thresholding. The thresholding parameter of FedLabel (0 ≤ β ≤ 1 in (4))
+determines whether either the local or global model produces a high-enough confidence logit to be used for
+training which has been proven to be effective for SSL [14]. We perform an ablation study on the different
+values of 0 ≤ β ≤ 1 and its effect on the overall performance ofFedLabel in Fig. 8. In Fig. 8, for all
+different datasets for a highβ = 0.9, the test accuracy is the lowest, implying that if we setβ to a too high
+value, FedLabel filters out too much unlabeled data and the model is not able to learn effectively. As we
+lower the thresholdβ < 0.9, the test accuracy improves significantly by at most approximately17%. We
+observe that the best performingβ value can be surprisingly low to around the range ofβ ∈ [0.3, 0.5] for the
+different datasets. This is due to the RandAugumentation step which heavily transforms the image so that
+the image becomes different from the images the clients have been training. Hence the overall confidence on
+the strongly-augumented image becomes lower as observed in Fig. 8.
+Gauaging Confidence of the Models.One may wonder what is the appropriate metric to measure the
+17confidence of the models’ logits (h(·) in (3)). While we use variance as the confidence metric for all the other
+results in our work, we investigate how another representative measure for confidence, entropy, compares
+to the variance metric. Entropy is a commonly used metric to measure the uncertainty of a probability
+distribution, and since logits are discrete probabilities it can also be presented as an adequate candidate for
+measuring the confidence of the models. In Fig. 9, we show that for CIFAR10 and CIFAR100 both entropy
+and variance performs similarly. However, for OrganAMNIST and BloodMNIST variance performs better
+than entropy showing that it can better judge the confidence of the models than entropy. We conjecture that
+this is due to entropy compressing the confidence values to be between[0, 1] while variance doesn’t have this,
+allowing to compare the confidence of the different logits more accurately.
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+7HVW$FFXUDF\
+͘ 
+͘ 
+͘ 
+͘ 
+͘ 
+ 
+&RPPXQLFDWLRQ5RXQGV
+
+
+
+
+
+
+
+7HVW$FFXUDF\
+͘ 
+͘ 
+͘ 
+͘ 
+͘ 
+(a) CIFAR10 (b) OrganAMNIST
+Figure 10: Ablation study on the number of local steps
+τ to obtain the local modelwL,k for client k ∈ [M] for
+larger number of labeled data (50% for CIFAR10 and
+20% for OrganAMNIST). The smallestτ = 5 yields the
+worst performance, but a slightly largerτ can largely
+improve the performance.
+Number of Training Steps to Obtain the Local
+Model for Larger Number of Labeled Data.
+For a larger number of labeled data, compared to the
+results in Fig. 6, we see in Fig. 10 that the smallest
+τ = 5 also yields the worst performance across the
+range of τ. However, even for a slightly largerτ, we
+can see that the performance improves with a much
+larger gap than the results in Fig. 6. This indicates
+that with a larger number of labeled data, even a
+slightly large τ can make the local model sufficiently
+represent the local data of the client, and improve
+the performance of FedLabel.
+18

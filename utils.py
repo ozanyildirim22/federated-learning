@@ -23,7 +23,7 @@ def get_args(parser: ArgumentParser):
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=20)
     parser.add_argument("--global_lr", type=float, default=1.0)
-    parser.add_argument("--local_lr", type=float, default=5e-2)
+    parser.add_argument("--local_lr", type=float, default=0.1)
     parser.add_argument(
         "--cuda",
         type=_str2bool,
