@@ -48,6 +48,10 @@ def preprocess(args):
     all_testsets = []
 
     for train_indices, test_indices in zip(train_idxs.values(), test_idxs.values()):
+        # Simulate label scarcity: only keep label_ratio fraction of training data
+        if args.label_ratio < 1.0:
+            n_keep = max(1, int(len(train_indices) * args.label_ratio))
+            train_indices = np.random.choice(train_indices, n_keep, replace=False).tolist()
         all_trainsets.append(CIFARDataset([cifar_train[i] for i in train_indices]))
         all_testsets.append(CIFARDataset([cifar_test[i] for i in test_indices]))
     os.mkdir(current_dir / "pickles")
@@ -60,6 +64,7 @@ def preprocess(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--client_num_in_total", type=int, default=100)
+    parser.add_argument("--label_ratio", type=float, default=0.2, help="Fraction of labeled training data per client (cross-device: 0.2)")
     parser.add_argument("--classes", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
