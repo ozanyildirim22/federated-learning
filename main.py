@@ -41,10 +41,10 @@ if __name__ == "__main__":
     global_model = get_model((args.model, args.dataset))
     criterion = CrossEntropyLoss()
     # Determine pickle directory based on dataset
-    if args.dataset == "cifar":
-        pickle_dir = "data/{}/pickles_alpha{}_label{}".format(args.dataset, args.alpha, args.label_ratio)
+    if args.dataset == "synthetic":
+        pickle_dir = "data/{}/pickles_label{}".format(args.dataset, args.label_ratio)
     else:
-        pickle_dir = "data/{}/pickles".format(args.dataset)
+        pickle_dir = "data/{}/pickles_alpha{}_label{}".format(args.dataset, args.alpha, args.label_ratio)
     client_num_in_total = len(listdir(pickle_dir))
     client_indices = range(client_num_in_total)
     trainers = [
