@@ -33,6 +33,10 @@ def preprocess(args):
     dimension = 60
     NUM_CLASS = 10
 
+    pickle_dir = current_dir / f"pickles_label{args.label_ratio}"
+    if os.path.isdir(pickle_dir):
+        shutil.rmtree(pickle_dir)
+
     samples_per_user = (
         np.random.lognormal(4, 2, args.client_num_in_total).astype(int) + 50
     )
@@ -60,6 +64,9 @@ def preprocess(args):
         W_global = np.random.normal(0, 1, (dimension, NUM_CLASS))
         b_global = np.random.normal(0, 1, NUM_CLASS)
 
+    all_trainsets = []
+    all_testsets = []
+
     for i in range(args.client_num_in_total):
 
         W = np.random.normal(mean_W[i], 1, (dimension, NUM_CLASS))
@@ -76,17 +83,40 @@ def preprocess(args):
             tmp = np.dot(xx[j], W) + b
             yy[j] = np.argmax(softmax(tmp))
 
-        X_split[i] = torch.tensor(xx, dtype=torch.float)
-        y_split[i] = torch.tensor(yy, dtype=torch.int64)
+        X = torch.tensor(xx, dtype=torch.float)
+        y = torch.tensor(yy, dtype=torch.int64)
 
-        print("{}-th users has {} examples".format(i, len(y_split[i])))
+        # Split into train (90%) and test (10%)
+        n_total = len(y)
+        n_test = max(1, n_total - int(0.9 * n_total))
+        n_train = n_total - n_test
 
-    if os.path.isdir(current_dir / "pickles"):
-        shutil.rmtree(current_dir / "pickles")
-    os.mkdir(current_dir / "pickles")
-    for i, (x, y) in enumerate(zip(X_split, y_split)):
-        with open("{}/pickles/client_{}.pkl".format(current_dir, i), "wb") as file:
-            pickle.dump(SyntheticDataset(x, y), file)
+        indices = np.arange(n_total)
+        np.random.shuffle(indices)
+        train_indices = indices[:n_train]
+        test_indices = indices[n_train:]
+
+        # Split train into labeled and unlabeled
+        np.random.shuffle(train_indices)
+        n_labeled = max(1, int(len(train_indices) * args.label_ratio))
+        labeled_indices = train_indices[:n_labeled]
+        unlabeled_indices = train_indices[n_labeled:]
+
+        labeled_set = SyntheticDataset(X[labeled_indices], y[labeled_indices])
+        unlabeled_set = SyntheticDataset(X[unlabeled_indices], y[unlabeled_indices])
+        test_set = SyntheticDataset(X[test_indices], y[test_indices])
+
+        all_trainsets.append((labeled_set, unlabeled_set))
+        all_testsets.append(test_set)
+
+        print("{}-th users has {} examples".format(i, n_total))
+
+    os.mkdir(pickle_dir)
+    for i in range(args.client_num_in_total):
+        with open("{}/client_{}.pkl".format(pickle_dir, i), "wb") as file:
+            pickle.dump((all_trainsets[i][0],    # labeled
+                         all_trainsets[i][1],    # unlabeled
+                         all_testsets[i]), file) # test
 
 
 if __name__ == "__main__":
@@ -95,5 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--beta", type=float, default=0.5)
     parser.add_argument("--iid", type=int, default=0)
+    parser.add_argument("--label_ratio", type=float, default=0.2)
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     preprocess(args)
