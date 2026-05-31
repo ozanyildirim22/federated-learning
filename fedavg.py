@@ -34,6 +34,8 @@ class FedAvgTrainer(ClientTrainer):
             self.trainloader, self.valloader = loaders
             self.unlabeled_loader = None
         self.id = client_id
+        self.iter_trainloader = iter(self.trainloader)
+        self.iter_valloader = iter(self.valloader)
 
     def train(self, global_model_parameters):
         SerializationTool.deserialize_model(self.model, global_model_parameters)
@@ -57,16 +59,30 @@ class FedAvgTrainer(ClientTrainer):
     def _train(self, model, optimizer, epochs):
         model.train()
         for _ in trange(epochs, desc="client [{}]".format(self.id)):
-            for x, y in self.trainloader:
-                # BatchNorm requires batch size > 1 during training
-                if x.size(0) <= 1:
-                    continue
-                x, y = x.to(self.device), y.to(self.device)
-                logit = model(x)
-                loss = self.criterion(logit, y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            x, y = self.get_data_batch(train=True)
+            # BatchNorm requires batch size > 1 during training
+            if x.size(0) <= 1:
+                continue
+            logit = model(x)
+            loss = self.criterion(logit, y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
         weight = torch.tensor(len(self.trainloader.dataset), dtype=torch.float)
         return weight, SerializationTool.serialize_model(model)
 
+    def get_data_batch(self, train: bool):
+        if train:
+            try:
+                data, targets = next(self.iter_trainloader)
+            except StopIteration:
+                self.iter_trainloader = iter(self.trainloader)
+                data, targets = next(self.iter_trainloader)
+        else:
+            try:
+                data, targets = next(self.iter_valloader)
+            except StopIteration:
+                self.iter_valloader = iter(self.valloader)
+                data, targets = next(self.iter_valloader)
+
+        return data.to(self.device), targets.to(self.device)
