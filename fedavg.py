@@ -60,6 +60,9 @@ class FedAvgTrainer(ClientTrainer):
         model.train()
         for _ in trange(epochs, desc="client [{}]".format(self.id)):
             x, y = self.get_data_batch(train=True)
+            # BatchNorm requires batch size > 1 during training
+            if x.size(0) <= 1:
+                continue
             logit = model(x)
             loss = self.criterion(logit, y)
             optimizer.zero_grad()
