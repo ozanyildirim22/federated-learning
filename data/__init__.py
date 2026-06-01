@@ -5,6 +5,7 @@ from .emnist import get_emnist
 from .cifar100 import get_cifar100
 from .organamnist import get_organamnist
 from .bloodmnist import get_bloodmnist
+from .pathamnist import get_pathamnist
 
 
 def get_dataloader(client_id, dataset, batch_size, **kwargs):
@@ -20,6 +21,8 @@ def get_dataloader(client_id, dataset, batch_size, **kwargs):
         return get_organamnist(client_id, batch_size, **kwargs)
     elif dataset == "bloodmnist":
         return get_bloodmnist(client_id, batch_size, **kwargs)
+    elif dataset == "pathamnist":
+        return get_pathamnist(client_id, batch_size, **kwargs)
     elif dataset == "synthetic":
         return get_synthetic(client_id, batch_size, **kwargs)
     else:
