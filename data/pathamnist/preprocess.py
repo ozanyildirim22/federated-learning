@@ -17,7 +17,7 @@ current_dir = Path(__file__).parent.absolute()
 class PathMNISTDataset(Dataset):
     def __init__(self, subset) -> None:
         self.data = torch.stack(list(map(lambda tup: tup[0], subset)))
-        self.targets = torch.stack(list(map(lambda tup: torch.tensor(tup[1]), subset))).squeeze()
+        self.targets = torch.stack(list(map(lambda tup: torch.tensor(tup[1]), subset))).flatten()
 
     def __getitem__(self, index):
         return self.data[index], self.targets[index]
