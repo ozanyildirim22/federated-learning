@@ -18,6 +18,7 @@ from data.emnist import EMNISTDataset
 from data.cifar100 import CIFAR100Dataset
 from data.organamnist import OrganAMNISTDataset
 from data.bloodmnist import BloodMNISTDataset
+from data.pathamnist import PathMNISTDataset
 # ===================================================================
 
 if __name__ == "__main__":

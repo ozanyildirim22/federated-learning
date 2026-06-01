@@ -90,6 +90,11 @@ def get_model(model_info):
             return ResNet18_BloodMNIST()
         else:
             raise NotImplementedError
+    elif _dataset == "pathamnist":
+        if _struct == "resnet18":
+            return ResNet18_PathMNIST()
+        else:
+            raise NotImplementedError
 
 
 @torch.no_grad()

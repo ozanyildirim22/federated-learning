@@ -249,3 +249,20 @@ class ResNet18_BloodMNIST(nn.Module):
     @property
     def info(self):
         return ("resnet18", "bloodmnist")
+
+
+class ResNet18_PathMNIST(nn.Module):
+    def __init__(self) -> None:
+        super(ResNet18_PathMNIST, self).__init__()
+        self.net = resnet18(weights=None)
+        # Adapt ResNet-18 for PathMNIST (3-channel 28x28)
+        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.net.maxpool = nn.Identity()
+        self.net.fc = nn.Linear(self.net.fc.in_features, 9)
+
+    def forward(self, x):
+        return self.net(x)
+
+    @property
+    def info(self):
+        return ("resnet18", "pathamnist")
