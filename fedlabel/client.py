@@ -19,20 +19,19 @@ class Client:
         self.iter_labeled = None
         self.iter_unlabeled = None
 
-        # RandAugment(1, 10) as specified in the ICCV 2023 paper
+        # RandAugment(1, 10) as specified in ICCV 2023 paper
         self.rand_augment = transforms.RandAugment(num_ops=1, magnitude=10)
 
     def apply_strong_augment(self, x):
         """
         Applies strong augmentation to a batch of images (B, C, H, W)
-        while preserving the input tensor's exact numerical range and preventing NaNs.
+        while preserving the input tensor's exact numerical range.
         """
         if x.dim() != 4:
             return x
 
         _, c, h, w = x.shape
 
-        # For 1-channel grayscale images, use safe random reflection crop
         if c == 1:
             pad = max(1, h // 8)
             padded = F.pad(x, (pad, pad, pad, pad), mode="reflect")
@@ -43,7 +42,6 @@ class Client:
                 augmented.append(img[:, top : top + h, left : left + w])
             return torch.stack(augmented, dim=0).to(self.device)
 
-        # For 3-channel images, safely map to uint8 [0, 255], apply RandAugment(1, 10), and restore range
         augmented = []
         for img in x.detach().cpu():
             img = torch.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
@@ -64,8 +62,7 @@ class Client:
         if metric is None:
             metric = getattr(self.config, "confidence_metric", "variance")
 
-        # Clamp logits before confidence calculation to prevent overflow in variance
-        safe_logits = torch.clamp(logits, min=-50.0, max=50.0)
+        safe_logits = torch.clamp(logits, min=-40.0, max=40.0)
 
         if metric == "variance":
             return torch.var(safe_logits, dim=-1, unbiased=False)
@@ -90,18 +87,6 @@ class Client:
             batch = next(current_iter)
         return batch, current_iter
 
-    @staticmethod
-    def _set_bn_eval(model):
-        for m in model.modules():
-            if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                m.eval()
-
-    @staticmethod
-    def _set_bn_train(model):
-        for m in model.modules():
-            if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                m.train()
-
     def update(self, global_model):
         global_model = global_model.to(self.device)
         global_model.eval()
@@ -114,7 +99,12 @@ class Client:
         local_model = copy.deepcopy(global_model).to(self.device)
         local_model.train()
 
-        optimizer_l = optim.SGD(local_model.parameters(), lr=self.config.local_lr)
+        optimizer_l = optim.SGD(
+            local_model.parameters(),
+            lr=self.config.local_lr,
+            momentum=0.9,
+            weight_decay=5e-4
+        )
         criterion = nn.CrossEntropyLoss()
 
         use_epochs = getattr(self.config, "use_epochs", False)
@@ -123,15 +113,10 @@ class Client:
             for _ in range(self.config.tau):
                 for x, y in self.labeled_loader:
                     x, y = x.to(self.device), y.to(self.device).long().view(-1)
-                    if x.size(0) == 0:
+                    if x.size(0) <= 1:
                         continue
-                    if x.size(0) == 1:
-                        self._set_bn_eval(local_model)
-                    else:
-                        self._set_bn_train(local_model)
                     optimizer_l.zero_grad()
-                    logits = local_model(x)
-                    loss = criterion(logits, y)
+                    loss = criterion(local_model(x), y)
                     if torch.isfinite(loss):
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0)
@@ -140,15 +125,10 @@ class Client:
             for _ in range(self.config.tau):
                 (x, y), self.iter_labeled = self._get_next_batch(self.labeled_loader, self.iter_labeled)
                 x, y = x.to(self.device), y.to(self.device).long().view(-1)
-                if x.size(0) == 0:
+                if x.size(0) <= 1:
                     continue
-                if x.size(0) == 1:
-                    self._set_bn_eval(local_model)
-                else:
-                    self._set_bn_train(local_model)
                 optimizer_l.zero_grad()
-                logits = local_model(x)
-                loss = criterion(logits, y)
+                loss = criterion(local_model(x), y)
                 if torch.isfinite(loss):
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0)
@@ -168,13 +148,17 @@ class Client:
         # -------------------------------------------------------------
         unlabeled_model = copy.deepcopy(global_model).to(self.device)
         unlabeled_model.train()
-        # Freeze BatchNorm running stats in Stage 2 so small filtered batches don't corrupt running_var
-        self._set_bn_eval(unlabeled_model)
 
-        optimizer_u = optim.SGD(unlabeled_model.parameters(), lr=self.config.local_lr)
-        criterion_u_sum = nn.CrossEntropyLoss(reduction="sum")
+        optimizer_u = optim.SGD(
+            unlabeled_model.parameters(),
+            lr=self.config.local_lr,
+            momentum=0.9,
+            weight_decay=5e-4
+        )
+        criterion_u = nn.CrossEntropyLoss()
 
         total_valid_unlabeled = 0
+        unlabeled_updated = False
 
         if self.unlabeled_loader is not None and len(self.unlabeled_loader) > 0:
             unlabeled_steps = []
@@ -191,8 +175,7 @@ class Client:
 
             local_model.eval()
             for x_u in unlabeled_steps:
-                batch_size = x_u.size(0)
-                if batch_size <= 1:
+                if x_u.size(0) <= 1:
                     continue
                 x_u = x_u.to(self.device)
 
@@ -229,6 +212,9 @@ class Client:
                 discarded_conf_filtered = discarded_conf[mask_threshold]
 
                 num_passed = x_u_filtered.size(0)
+                if num_passed <= 1:
+                    continue
+
                 total_valid_unlabeled += num_passed
 
                 x_u_aug = self.apply_strong_augment(x_u_filtered)
@@ -236,8 +222,7 @@ class Client:
                 optimizer_u.zero_grad()
                 logits_u = unlabeled_model(x_u_aug)
 
-                # Normalized by mini-batch size b (Eq. 10)
-                loss_ce = criterion_u_sum(logits_u, pseudo_labels_filtered) / float(batch_size)
+                loss_ce = criterion_u(logits_u, pseudo_labels_filtered)
 
                 discarded_preds = torch.argmax(discarded_logits_filtered, dim=-1)
                 consistency_mask = discarded_preds == pseudo_labels_filtered
@@ -254,18 +239,18 @@ class Client:
                     )
                     lambda_k = self.config.lambda_0 * torch.clamp(ratio, min=0.0, max=1.0)
 
-                    # Use log_target=True to prevent 0 * log(0) NaN underflow
                     kl_loss_per_sample = F.kl_div(
                         log_probs_u, log_probs_discarded, reduction="none", log_target=True
                     ).sum(dim=-1)
 
-                    loss_kl = (lambda_k * kl_loss_per_sample).sum() / float(batch_size)
+                    loss_kl = (lambda_k * kl_loss_per_sample).mean()
 
                 loss_total = loss_ce + loss_kl
                 if torch.isfinite(loss_total):
                     loss_total.backward()
                     torch.nn.utils.clip_grad_norm_(unlabeled_model.parameters(), max_norm=5.0)
                     optimizer_u.step()
+                    unlabeled_updated = True
 
         unlabeled_state = {k: v.detach().cpu() for k, v in unlabeled_model.state_dict().items()}
 
@@ -277,18 +262,20 @@ class Client:
         }
 
         # -------------------------------------------------------------
-        # Stage 3: Merging Updates (NaN-Safe)
+        # Stage 3: Merging Updates
         # -------------------------------------------------------------
-        # CRITICAL FIX: Only sum trainable parameters (Delta w_L + Delta w_U).
-        # For BatchNorm buffers (running_mean, running_var), use ONLY delta_w_L
-        # so we never subtract global running_var twice and make it negative!
         delta_w = {}
         for k in global_state.keys():
             if k in param_keys:
                 combined = delta_w_L[k] + delta_w_U[k]
                 delta_w[k] = torch.nan_to_num(combined, nan=0.0, posinf=0.0, neginf=0.0)
             elif torch.is_floating_point(global_state[k]):
-                delta_w[k] = torch.nan_to_num(delta_w_L[k], nan=0.0, posinf=0.0, neginf=0.0)
+                if unlabeled_updated:
+                    # Average the BatchNorm running buffers so running_var stays mathematically positive
+                    buf_avg = 0.5 * (delta_w_L[k] + delta_w_U[k])
+                    delta_w[k] = torch.nan_to_num(buf_avg, nan=0.0, posinf=0.0, neginf=0.0)
+                else:
+                    delta_w[k] = torch.nan_to_num(delta_w_L[k], nan=0.0, posinf=0.0, neginf=0.0)
             else:
                 delta_w[k] = torch.zeros_like(global_state[k])
 
