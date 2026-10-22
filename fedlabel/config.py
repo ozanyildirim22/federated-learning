@@ -35,10 +35,11 @@ def get_args(parser: argparse.ArgumentParser = None):
     parser.add_argument("--label_ratio", type=float, default=0.2, help="Fraction of labeled training data per client (e.g. 0.2 or 0.05)")
     
     # FedLabel Specific Hyperparameters (ICCV 2023)
+    # FedLabel Specific Hyperparameters (ICCV 2023)
     parser.add_argument("--beta", type=float, default=0.95, help="Confidence threshold beta for pseudo-labeling (eq. 4)")
     parser.add_argument("--lambda_0", type=float, default=1.0, help="Upper bound weight factor lambda_0 for KL consistency loss (eq. 7)")
-    parser.add_argument("--tau", type=int, default=5, help="Labeled steps (mini-batch iterations) per client round")
-    parser.add_argument("--tau_prime", type=int, default=5, help="Unlabeled steps (mini-batch iterations) per client round")
+    parser.add_argument("--tau", type=int, default=15, help="Labeled steps (mini-batch iterations) per client round")
+    parser.add_argument("--tau_prime", type=int, default=15, help="Unlabeled steps (mini-batch iterations) per client round")
     parser.add_argument("--confidence_metric", type=str, default="variance", choices=["variance", "entropy", "max_prob"], help="Confidence scoring function h(.)")
     parser.add_argument("--use_epochs", type=_str2bool, default=False, help="If true, tau and tau_prime represent full epochs over loaders instead of mini-batch steps")
     
