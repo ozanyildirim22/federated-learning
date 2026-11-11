@@ -101,18 +101,22 @@ def get_model(model_info):
 def evaluate(model, testloader, criterion, gpu=None):
     model.eval()
     correct = 0
-    loss = 0
+    total_loss = 0.0
+    total_samples = 0
     if gpu is not None:
         model = model.to(gpu)
     for x, y in testloader:
         if gpu is not None:
             x, y = x.to(gpu), y.to(gpu)
+        y = y.long().view(-1)
 
         logit = model(x)
-        loss += criterion(logit, y)
+        total_loss += criterion(logit, y).item() * x.size(0)
 
         pred_y = torch.softmax(logit, -1).argmax(-1)
-        correct += torch.eq(pred_y, y).int().sum()
+        correct += torch.eq(pred_y, y).int().sum().item()
+        total_samples += x.size(0)
 
-    acc = 100.0 * (correct / len(testloader.dataset))
-    return loss, acc
+    avg_loss = total_loss / max(total_samples, 1)
+    acc = 100.0 * (correct / max(total_samples, 1))
+    return avg_loss, acc

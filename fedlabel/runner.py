@@ -111,28 +111,36 @@ class FedLabelRunner:
             
         self.server.aggregate(client_updates)
 
-    def evaluate(self):
+    def evaluate(self, all_clients=True):
         """
-        Evaluates the global model across test/validation loaders of selected clients.
+        Evaluates the global model across clients' test/validation loaders.
+        By default evaluates across ALL clients in the network for a comprehensive
+        global metric, accurately weighted by each client's test sample count.
         """
         criterion = torch.nn.CrossEntropyLoss()
-        avg_loss = 0.0
-        avg_acc = 0.0
         
-        for _ in trange(self.config.test_round, desc="\033[1;36mevaluating epoch\033[0m"):
-            selected_client_ids = self.server.select_clients(
+        if all_clients:
+            target_clients = self.clients
+        else:
+            selected_ids = self.server.select_clients(
                 self.client_indices, self.config.client_num_per_round
             )
-            for cid in selected_client_ids:
-                client = self.clients[cid]
-                loss, acc = evaluate(self.server.global_model, client.valloader, criterion, self.device)
-                avg_loss += float(loss)
-                avg_acc += float(acc)
-                
-        total_evals = self.config.client_num_per_round * self.config.test_round
-        avg_loss /= total_evals
-        avg_acc /= total_evals
-        
+            target_clients = [self.clients[cid] for cid in selected_ids]
+
+        total_samples = 0
+        total_loss = 0.0
+        total_correct = 0.0
+
+        for client in target_clients:
+            c_loss, c_acc = evaluate(self.server.global_model, client.valloader, criterion, self.device)
+            c_samples = len(client.valloader.dataset)
+            total_loss += c_loss * c_samples
+            total_correct += (c_acc / 100.0) * c_samples
+            total_samples += c_samples
+
+        avg_loss = total_loss / max(total_samples, 1)
+        avg_acc = 100.0 * (total_correct / max(total_samples, 1))
+
         return avg_loss, avg_acc
 
     def run(self):
