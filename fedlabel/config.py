@@ -42,5 +42,6 @@ def get_args(parser: argparse.ArgumentParser = None):
     parser.add_argument("--tau_prime", type=int, default=15, help="Unlabeled steps (mini-batch iterations) per client round")
     parser.add_argument("--confidence_metric", type=str, default="variance", choices=["variance", "entropy", "max_prob"], help="Confidence scoring function h(.)")
     parser.add_argument("--use_epochs", type=_str2bool, default=False, help="If true, tau and tau_prime represent full epochs over loaders instead of mini-batch steps")
-    
+    parser.add_argument("--global_test", type=_str2bool, default=True)
+    parser.add_argument("--eval_every", type=int, default=50)
     return parser.parse_args()
