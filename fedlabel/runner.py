@@ -41,19 +41,27 @@ class FedLabelRunner:
         torch.backends.cudnn.deterministic = True
 
         # Global model initialization
-        self.global_model = get_model((config.model, config.dataset)).to(self.device)
+        self.global_model = get_model(
+            (config.model, config.dataset), cifar_stem=getattr(config, "cifar_stem", True)
+        ).to(self.device)
         self.server = Server(self.global_model)
 
         # Locate preprocessed partitioned client pickles
+        self.split = getattr(config, "split", "official")
         if config.dataset == "synthetic":
             self.pickle_dir = "data/{}/pickles_label{}".format(config.dataset, config.label_ratio)
+        elif config.dataset == "cifar":
+            from data.cifar import cifar_pickle_dir
+            self.pickle_dir = str(cifar_pickle_dir(config.alpha, config.label_ratio, self.split, config.seed))
         else:
             self.pickle_dir = "data/{}/pickles_alpha{}_label{}".format(config.dataset, config.alpha, config.label_ratio)
 
         if not os.path.isdir(self.pickle_dir):
             raise FileNotFoundError(
                 f"Dataset directory '{self.pickle_dir}' not found. "
-                f"Please run 'python data/{config.dataset}/preprocess.py --alpha {config.alpha} --label_ratio {config.label_ratio}' first."
+                f"Please run 'python data/{config.dataset}/preprocess.py --alpha {config.alpha} --label_ratio {config.label_ratio}"
+                + (f" --split paper --seed {config.seed}" if self.split == "paper" else "")
+                + "' first."
             )
 
         self.client_num_in_total = len(listdir(self.pickle_dir))
@@ -62,19 +70,36 @@ class FedLabelRunner:
         self.clients = []
         self._setup_clients()
 
-        # Global test set = union of all clients' test splits.
-        # CIFAR-10 -> 10000 samples, OrganAMNIST -> 17778 samples (full official test set).
+        # Global test set: CIFAR-10 official split -> the official 10000 test images;
+        # CIFAR-10 paper split -> the pooled 15% (9000) test set; other datasets -> union of
+        # all clients' test splits (e.g. OrganAMNIST -> 17778, the full official test set).
         self.global_testloader = None
         if getattr(config, "global_test", True):
-            test_sets = [c.valloader.dataset for c in self.clients]
             self.global_testloader = DataLoader(
-                ConcatDataset(test_sets), batch_size=500, shuffle=False
+                self._build_global_testset(), batch_size=500, shuffle=False
             )
             print(f"\033[1;35mGlobal test set size: {len(self.global_testloader.dataset)}\033[0m")
         else:
             print("\033[1;35mglobal_test is OFF: evaluating on random clients' val loaders.\033[0m")
 
         self.history = []
+
+    def _build_global_testset(self):
+        """
+        Full, un-partitioned test set used to score the global model (paper protocol).
+        CIFAR-10 with the official split loads the official 10k test split directly, with
+        the same ToTensor() transform the preprocess uses. With --split paper (and for
+        other datasets) it is the union of all clients' test splits, which for the paper
+        split is exactly the pooled 15% (9k) test set.
+        """
+        if self.config.dataset == "cifar" and self.split == "official":
+            from torchvision.datasets import CIFAR10
+            from torchvision import transforms
+            root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "cifar")
+            testset = CIFAR10(root, train=False, transform=transforms.ToTensor(), download=True)
+            assert len(testset) == 10000, f"Expected 10000 CIFAR-10 test images, got {len(testset)}"
+            return testset
+        return ConcatDataset([c.valloader.dataset for c in self.clients])
 
     def _setup_clients(self):
         """
@@ -83,13 +108,15 @@ class FedLabelRunner:
         print(f"\033[1;32mUsing device: {self.device}\033[0m")
         print(f"Loading data for {self.client_num_in_total} clients from {self.pickle_dir}...")
 
+        extra = {"split": self.split, "seed": self.config.seed} if self.config.dataset == "cifar" else {}
         for client_id in range(self.client_num_in_total):
             loaders = get_dataloader(
                 client_id,
                 self.config.dataset,
                 self.config.batch_size,
                 alpha=self.config.alpha,
-                label_ratio=self.config.label_ratio
+                label_ratio=self.config.label_ratio,
+                **extra
             )
             if len(loaders) == 3:
                 labeled_loader, unlabeled_loader, valloader = loaders
@@ -155,7 +182,7 @@ class FedLabelRunner:
         Fallback: evaluates the global model on val loaders of randomly selected clients.
         Only used when global_test is disabled.
         """
-        criterion = torch.nn.CrossEntropyLoss()
+        criterion = torch.nn.CrossEntropyLoss(reduction="sum")
         total_loss = 0.0
         total_acc = 0.0
         total_evals = 0
@@ -167,7 +194,7 @@ class FedLabelRunner:
             for cid in selected_client_ids:
                 client = self.clients[cid]
                 loss, acc = evaluate(self.server.global_model, client.valloader, criterion, self.device)
-                total_loss += float(loss)
+                total_loss += float(loss) / len(client.valloader.dataset)
                 total_acc += float(acc)
                 total_evals += 1
 

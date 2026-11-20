@@ -36,7 +36,9 @@ def get_args(parser: ArgumentParser):
     return parser.parse_args()
 
 
-def get_model(model_info):
+def get_model(model_info, cifar_stem=True):
+    """cifar_stem: for CIFAR ResNets, use the 3x3/1 stem without maxpool (True)
+    or keep the standard torchvision ImageNet stem (False)."""
     _struct, _dataset = model_info
     if _dataset == "mnist":
         if _struct == "mlp":
@@ -49,9 +51,9 @@ def get_model(model_info):
         if _struct == "cnn":
             return CNN_CIFAR()
         elif _struct == "resnet18":
-            return ResNet18_CIFAR()
+            return ResNet18_CIFAR(cifar_stem=cifar_stem)
         elif _struct == "resnet34":
-            return ResNet34_CIFAR()
+            return ResNet34_CIFAR(cifar_stem=cifar_stem)
         else:
             raise NotImplementedError
     elif _dataset == "femnist":

@@ -169,12 +169,14 @@ class CNN_CIFAR(nn.Module):
 
 
 class ResNet34_CIFAR(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, cifar_stem: bool = True) -> None:
         super(ResNet34_CIFAR, self).__init__()
         self.net = resnet34(weights=None)
-        # Adapt ResNet-34 for CIFAR-10 (32x32 instead of 224x224)
-        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.net.maxpool = nn.Identity()
+        if cifar_stem:
+            # Adapt ResNet-34 for CIFAR-10 (32x32 instead of 224x224)
+            self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            self.net.maxpool = nn.Identity()
+        # else: keep the standard torchvision (ImageNet) stem: 7x7/2 conv + maxpool
         self.net.fc = nn.Linear(self.net.fc.in_features, 10)
 
     def forward(self, x):
@@ -186,12 +188,14 @@ class ResNet34_CIFAR(nn.Module):
 
 
 class ResNet18_CIFAR(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, cifar_stem: bool = True) -> None:
         super(ResNet18_CIFAR, self).__init__()
         self.net = resnet18(weights=None)
-        # Adapt ResNet-18 for CIFAR-10 (32x32 instead of 224x224)
-        self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.net.maxpool = nn.Identity()
+        if cifar_stem:
+            # Adapt ResNet-18 for CIFAR-10 (32x32 instead of 224x224)
+            self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            self.net.maxpool = nn.Identity()
+        # else: keep the standard torchvision (ImageNet) stem: 7x7/2 conv + maxpool
         self.net.fc = nn.Linear(self.net.fc.in_features, 10)
 
     def forward(self, x):

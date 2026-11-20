@@ -32,9 +32,9 @@ def get_args(parser: argparse.ArgumentParser = None):
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--alpha", type=float, default=0.1, help="Dirichlet heterogeneity parameter alpha")
+    parser.add_argument("--split", type=str, default="official", choices=["official", "paper"], help="CIFAR-10 data split: official 50k/10k, or paper = pooled 80/5/15 (FedLabel appendix); uses --seed as the partition seed")
     parser.add_argument("--label_ratio", type=float, default=0.2, help="Fraction of labeled training data per client (e.g. 0.2 or 0.05)")
     
-    # FedLabel Specific Hyperparameters (ICCV 2023)
     # FedLabel Specific Hyperparameters (ICCV 2023)
     parser.add_argument("--beta", type=float, default=0.95, help="Confidence threshold beta for pseudo-labeling (eq. 4)")
     parser.add_argument("--lambda_0", type=float, default=1.0, help="Upper bound weight factor lambda_0 for KL consistency loss (eq. 7)")
@@ -42,6 +42,15 @@ def get_args(parser: argparse.ArgumentParser = None):
     parser.add_argument("--tau_prime", type=int, default=15, help="Unlabeled steps (mini-batch iterations) per client round")
     parser.add_argument("--confidence_metric", type=str, default="variance", choices=["variance", "entropy", "max_prob"], help="Confidence scoring function h(.)")
     parser.add_argument("--use_epochs", type=_str2bool, default=False, help="If true, tau and tau_prime represent full epochs over loaders instead of mini-batch steps")
-    parser.add_argument("--global_test", type=_str2bool, default=True)
-    parser.add_argument("--eval_every", type=int, default=50)
+
+    # Local optimizer / model options
+    parser.add_argument("--momentum", type=float, default=0.9, help="SGD momentum for local updates")
+    parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay for local updates")
+    parser.add_argument("--grad_clip", type=float, default=5.0, help="Max grad norm for clipping (<=0 disables)")
+    parser.add_argument("--cifar_stem", type=_str2bool, default=True, help="CIFAR ResNets: 3x3 stem without maxpool (true) or torchvision ImageNet stem (false)")
+
+    # Evaluation
+    parser.add_argument("--global_test", type=_str2bool, default=True, help="Score the global model on the full test set (CIFAR-10: all 10k images). false = old per-client average over 10 random clients")
+    parser.add_argument("--eval_every", type=int, default=50, help="With --global_test, evaluate every N rounds (0 = only at the end)")
+    
     return parser.parse_args()

@@ -77,6 +77,11 @@ class Client:
         else:
             raise ValueError(f"Unknown confidence metric: {metric}")
 
+    def _clip_grads(self, model):
+        max_norm = getattr(self.config, "grad_clip", 5.0)
+        if max_norm is not None and max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+
     def _get_next_batch(self, loader, current_iter):
         if current_iter is None:
             current_iter = iter(loader)
@@ -102,8 +107,8 @@ class Client:
         optimizer_l = optim.SGD(
             local_model.parameters(),
             lr=self.config.local_lr,
-            momentum=0.9,
-            weight_decay=5e-4
+            momentum=getattr(self.config, "momentum", 0.9),
+            weight_decay=getattr(self.config, "weight_decay", 5e-4)
         )
         criterion = nn.CrossEntropyLoss()
 
@@ -119,7 +124,7 @@ class Client:
                     loss = criterion(local_model(x), y)
                     if torch.isfinite(loss):
                         loss.backward()
-                        torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0)
+                        self._clip_grads(local_model)
                         optimizer_l.step()
         else:
             for _ in range(self.config.tau):
@@ -131,7 +136,7 @@ class Client:
                 loss = criterion(local_model(x), y)
                 if torch.isfinite(loss):
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0)
+                    self._clip_grads(local_model)
                     optimizer_l.step()
 
         local_state = {k: v.detach().cpu() for k, v in local_model.state_dict().items()}
@@ -152,8 +157,8 @@ class Client:
         optimizer_u = optim.SGD(
             unlabeled_model.parameters(),
             lr=self.config.local_lr,
-            momentum=0.9,
-            weight_decay=5e-4
+            momentum=getattr(self.config, "momentum", 0.9),
+            weight_decay=getattr(self.config, "weight_decay", 5e-4)
         )
         criterion_u = nn.CrossEntropyLoss()
 
@@ -248,7 +253,7 @@ class Client:
                 loss_total = loss_ce + loss_kl
                 if torch.isfinite(loss_total):
                     loss_total.backward()
-                    torch.nn.utils.clip_grad_norm_(unlabeled_model.parameters(), max_norm=5.0)
+                    self._clip_grads(unlabeled_model)
                     optimizer_u.step()
                     unlabeled_updated = True
 
