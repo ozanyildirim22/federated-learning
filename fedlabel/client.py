@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.utils.data import ConcatDataset, DataLoader
 from torchvision import transforms
 
 
@@ -91,6 +92,69 @@ class Client:
             current_iter = iter(loader)
             batch = next(current_iter)
         return batch, current_iter
+
+    def _fedavg_loader(self, fully_labeled):
+        if not fully_labeled or self.unlabeled_loader is None:
+            return self.labeled_loader
+        if getattr(self, "_full_loader", None) is None:
+            full = ConcatDataset([self.labeled_loader.dataset, self.unlabeled_loader.dataset])
+            self._full_loader = DataLoader(full, batch_size=self.labeled_loader.batch_size, shuffle=True)
+        return self._full_loader
+
+    def update_fedavg(self, global_model, fully_labeled=False):
+        """
+        Supervised FedAvg local update, the baseline rows of the paper's Tables 3/4:
+          fully_labeled=False -> 'FedAvg' (partially labeled: labeled data only)
+          fully_labeled=True  -> 'FedAvg (100%)' (the unlabeled data's true labels are used too)
+        It runs tau + tau_prime SGD steps, the same number of local updates per round as
+        FedLabel (tau labeled + tau_prime unlabeled), with the same optimizer settings.
+        Returns (delta_w, r_k) with r_k = number of local training samples, as in FedAvg.
+        """
+        global_model = global_model.to(self.device)
+        global_state = {k: v.detach().cpu().clone() for k, v in global_model.state_dict().items()}
+
+        model = copy.deepcopy(global_model).to(self.device)
+        model.train()
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=self.config.local_lr,
+            momentum=getattr(self.config, "momentum", 0.9),
+            weight_decay=getattr(self.config, "weight_decay", 5e-4)
+        )
+        criterion = nn.CrossEntropyLoss()
+        loader = self._fedavg_loader(fully_labeled)
+        iter_attr = "iter_full" if fully_labeled else "iter_labeled"
+        n_steps = self.config.tau + self.config.tau_prime
+
+        def batches():
+            if getattr(self.config, "use_epochs", False):
+                for _ in range(n_steps):
+                    yield from loader
+            else:
+                for _ in range(n_steps):
+                    batch, it = self._get_next_batch(loader, getattr(self, iter_attr, None))
+                    setattr(self, iter_attr, it)
+                    yield batch
+
+        for x, y in batches():
+            x, y = x.to(self.device), y.to(self.device).long().view(-1)
+            if x.size(0) <= 1:
+                continue
+            optimizer.zero_grad()
+            loss = criterion(model(x), y)
+            if torch.isfinite(loss):
+                loss.backward()
+                self._clip_grads(model)
+                optimizer.step()
+
+        local_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        delta_w = {
+            k: torch.nan_to_num(local_state[k] - global_state[k], nan=0.0, posinf=0.0, neginf=0.0)
+            if torch.is_floating_point(local_state[k])
+            else torch.zeros_like(local_state[k])
+            for k in global_state.keys()
+        }
+        return delta_w, max(len(loader.dataset), 1)
 
     def update(self, global_model):
         global_model = global_model.to(self.device)

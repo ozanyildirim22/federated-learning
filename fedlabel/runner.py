@@ -53,7 +53,12 @@ class FedLabelRunner:
         elif config.dataset == "cifar":
             from data.cifar import cifar_pickle_dir
             self.pickle_dir = str(cifar_pickle_dir(config.alpha, config.label_ratio, self.split, config.seed))
+        elif config.dataset == "organamnist":
+            from data.organamnist import organamnist_pickle_dir
+            self.pickle_dir = str(organamnist_pickle_dir(config.alpha, config.label_ratio, self.split, config.seed))
         else:
+            if self.split == "paper":
+                raise NotImplementedError(f"--split paper is only implemented for cifar and organamnist, not {config.dataset}")
             self.pickle_dir = "data/{}/pickles_alpha{}_label{}".format(config.dataset, config.alpha, config.label_ratio)
 
         if not os.path.isdir(self.pickle_dir):
@@ -72,7 +77,8 @@ class FedLabelRunner:
 
         # Global test set: CIFAR-10 official split -> the official 10000 test images;
         # CIFAR-10 paper split -> the pooled 15% (9000) test set; other datasets -> union of
-        # all clients' test splits (e.g. OrganAMNIST -> 17778, the full official test set).
+        # all clients' test splits (OrganAMNIST official -> 17778, the full official test set;
+        # OrganAMNIST paper split -> the pooled 15% (8825) test set).
         self.global_testloader = None
         if getattr(config, "global_test", True):
             self.global_testloader = DataLoader(
@@ -108,7 +114,11 @@ class FedLabelRunner:
         print(f"\033[1;32mUsing device: {self.device}\033[0m")
         print(f"Loading data for {self.client_num_in_total} clients from {self.pickle_dir}...")
 
-        extra = {"split": self.split, "seed": self.config.seed} if self.config.dataset == "cifar" else {}
+        extra = (
+            {"split": self.split, "seed": self.config.seed}
+            if self.config.dataset in ("cifar", "organamnist") else {}
+        )
+        print(f"\033[1;32mAlgorithm: {getattr(self.config, 'algorithm', 'fedlabel')}\033[0m")
         for client_id in range(self.client_num_in_total):
             loaders = get_dataloader(
                 client_id,
@@ -145,10 +155,18 @@ class FedLabelRunner:
             self.client_indices, self.config.client_num_per_round
         )
 
+        algorithm = getattr(self.config, "algorithm", "fedlabel")
         client_updates = []
         for cid in selected_client_ids:
             client = self.clients[cid]
-            delta_w, r_k = client.update(self.server.global_model)
+            if algorithm == "fedlabel":
+                delta_w, r_k = client.update(self.server.global_model)
+            else:
+                # Supervised FedAvg baselines of the paper's Table 3/4, trained and scored
+                # with exactly the same data, client sampling and global test set.
+                delta_w, r_k = client.update_fedavg(
+                    self.server.global_model, fully_labeled=(algorithm == "fedavg_full")
+                )
             client_updates.append((delta_w, r_k))
 
         self.server.aggregate(client_updates)
@@ -205,7 +223,8 @@ class FedLabelRunner:
         """
         Runs full training loop and outputs final performance metrics.
         """
-        print(f"\033[1;33mStarting FedLabel Training for {self.config.comms_round} rounds...\033[0m")
+        name = {"fedlabel": "FedLabel", "fedavg": "FedAvg", "fedavg_full": "FedAvg (100%)"}[getattr(self.config, "algorithm", "fedlabel")]
+        print(f"\033[1;33mStarting {name} Training for {self.config.comms_round} rounds...\033[0m")
         eval_every = getattr(self.config, "eval_every", 0)
 
         for r in trange(self.config.comms_round, desc="\033[1;33mtraining epoch\033[0m"):
@@ -225,6 +244,6 @@ class FedLabelRunner:
             avg_loss, avg_acc = self.evaluate()
 
         print("\033[1;32m---------------------- RESULTS ----------------------\033[0m")
-        print("\033[1;33m Global FedLabel loss: {:.4f}\033[0m".format(avg_loss))
-        print("\033[1;33m Global FedLabel accuracy: {:.2f}%\033[0m".format(avg_acc))
+        print("\033[1;33m Global {} loss: {:.4f}\033[0m".format(name, avg_loss))
+        print("\033[1;33m Global {} accuracy: {:.2f}%\033[0m".format(name, avg_acc))
         return avg_loss, avg_acc

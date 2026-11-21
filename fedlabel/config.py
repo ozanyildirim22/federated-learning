@@ -15,6 +15,11 @@ def get_args(parser: argparse.ArgumentParser = None):
         parser = argparse.ArgumentParser(description="FedLabel: Selective Knowledge Assimilation for Federated Learning with Limited Labels")
         
     # Baseline & Federated Learning Setup
+    parser.add_argument(
+        "--algorithm", type=str, default="fedlabel", choices=["fedlabel", "fedavg", "fedavg_full"],
+        help="fedlabel; fedavg = supervised FedAvg on the labeled data only (paper's 'FedAvg' row); "
+             "fedavg_full = supervised FedAvg with all training data labeled (paper's 'FedAvg (100%%)' row)",
+    )
     parser.add_argument("--dataset", type=str, default="mnist", help="Dataset name: mnist, cifar, organamnist, bloodmnist, etc.")
     parser.add_argument("--model", type=str, default="cnn", help="Model architecture: cnn, resnet18, resnet34, resnet50, mlp")
     parser.add_argument("--comms_round", type=int, default=40, help="Total communication rounds")
@@ -32,7 +37,7 @@ def get_args(parser: argparse.ArgumentParser = None):
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument("--alpha", type=float, default=0.1, help="Dirichlet heterogeneity parameter alpha")
-    parser.add_argument("--split", type=str, default="official", choices=["official", "paper"], help="CIFAR-10 data split: official 50k/10k, or paper = pooled 80/5/15 (FedLabel appendix); uses --seed as the partition seed")
+    parser.add_argument("--split", type=str, default="official", choices=["official", "paper"], help="CIFAR-10 / OrganAMNIST data split: official train/test, or paper = pooled 80/5/15 (FedLabel appendix); uses --seed as the partition seed")
     parser.add_argument("--label_ratio", type=float, default=0.2, help="Fraction of labeled training data per client (e.g. 0.2 or 0.05)")
     
     # FedLabel Specific Hyperparameters (ICCV 2023)
