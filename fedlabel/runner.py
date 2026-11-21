@@ -177,21 +177,48 @@ class FedLabelRunner:
         Evaluates the global model on the union of all clients' test splits.
         Self-contained (does not depend on utils.evaluate), so the loss is
         a true per-sample cross-entropy and accuracy is in percent.
+        Also stores macro precision / recall / F1 (percent) in self.last_metrics:
+        per-class scores averaged over every class that occurs in the labels or the
+        predictions, with 0 for an undefined ratio (sklearn's average='macro',
+        zero_division=0). Macro F1 weights rare classes equally, which matters for the
+        class-imbalanced OrganAMNIST test set.
         """
         model = self.server.global_model
         model.eval()
         total_loss, correct, n = 0.0, 0, 0
         max_abs_logit = 0.0
+        tp = fp = fn = None
 
         for x, y in self.global_testloader:
             x = x.to(self.device)
             y = y.to(self.device).long().view(-1)
             out = model(x)
+            pred = out.argmax(dim=1)
             total_loss += F.cross_entropy(out, y, reduction="sum").item()
-            correct += (out.argmax(dim=1) == y).sum().item()
+            correct += (pred == y).sum().item()
             n += y.size(0)
             max_abs_logit = max(max_abs_logit, out.abs().max().item())
 
+            c = out.size(1)
+            if tp is None:
+                tp, fp, fn = (torch.zeros(c, dtype=torch.long, device=self.device) for _ in range(3))
+            hit = pred == y
+            tp += torch.bincount(y[hit], minlength=c)
+            fp += torch.bincount(pred[~hit], minlength=c)
+            fn += torch.bincount(y[~hit], minlength=c)
+
+        tp, fp, fn = tp.double(), fp.double(), fn.double()
+        present = (tp + fn + fp) > 0
+        precision = torch.where(tp + fp > 0, tp / (tp + fp).clamp(min=1), torch.zeros_like(tp))
+        recall = torch.where(tp + fn > 0, tp / (tp + fn).clamp(min=1), torch.zeros_like(tp))
+        f1 = torch.where(precision + recall > 0,
+                         2 * precision * recall / (precision + recall).clamp(min=1e-12),
+                         torch.zeros_like(tp))
+        self.last_metrics = {
+            "precision": 100.0 * precision[present].mean().item(),
+            "recall": 100.0 * recall[present].mean().item(),
+            "f1": 100.0 * f1[present].mean().item(),
+        }
         self.last_max_abs_logit = max_abs_logit
         return total_loss / n, 100.0 * correct / n
 
@@ -231,10 +258,11 @@ class FedLabelRunner:
             self.train_round(r)
             if self.global_testloader is not None and eval_every > 0 and (r + 1) % eval_every == 0:
                 loss, acc = self.evaluate_global()
-                self.history.append((r + 1, loss, acc))
+                self.history.append((r + 1, loss, acc, self.last_metrics["f1"]))
                 print(
                     f"\n\033[1;36m[round {r + 1}] global test loss {loss:.4f} | "
-                    f"acc {acc:.2f}% | max|logit| {self.last_max_abs_logit:.1f}\033[0m"
+                    f"acc {acc:.2f}% | f1 {self.last_metrics['f1']:.2f}% | "
+                    f"max|logit| {self.last_max_abs_logit:.1f}\033[0m"
                 )
 
         print("\033[1;36mStarting Final Evaluation...\033[0m")
@@ -246,4 +274,9 @@ class FedLabelRunner:
         print("\033[1;32m---------------------- RESULTS ----------------------\033[0m")
         print("\033[1;33m Global {} loss: {:.4f}\033[0m".format(name, avg_loss))
         print("\033[1;33m Global {} accuracy: {:.2f}%\033[0m".format(name, avg_acc))
+        if self.global_testloader is not None:
+            m = self.last_metrics
+            print("\033[1;33m Global {} macro-precision: {:.2f}%\033[0m".format(name, m["precision"]))
+            print("\033[1;33m Global {} macro-recall: {:.2f}%\033[0m".format(name, m["recall"]))
+            print("\033[1;33m Global {} macro-F1: {:.2f}%\033[0m".format(name, m["f1"]))
         return avg_loss, avg_acc

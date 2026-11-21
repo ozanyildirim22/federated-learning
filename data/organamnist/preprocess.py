@@ -26,12 +26,16 @@ class OrganAMNISTDataset(Dataset):
 
 def pickle_dir_name(alpha, label_ratio, split="official", seed=0):
     """Directory holding one client_<i>.pkl per client.
-    'official': MedMNIST's own train/test split (train partitioned, full test kept).
+    'official': MedMNIST's own patient-level train/test split (train partitioned, full
+                17,778-image test set kept). Seed 0 keeps the original folder name; other
+                partition seeds get a _seed suffix.
     'paper'   : FedLabel arXiv appendix split, 80% train / 5% val / 15% test of the
                 pooled train+val+test images; the seed is in the name because the paper
                 averages over 3 partition seeds."""
     if split == "paper":
         return f"pickles_paper_alpha{alpha}_label{label_ratio}_seed{seed}"
+    if seed:
+        return f"pickles_alpha{alpha}_label{label_ratio}_seed{seed}"
     return f"pickles_alpha{alpha}_label{label_ratio}"
 
 
@@ -123,7 +127,7 @@ def preprocess(args):
     if getattr(args, "split", "official") == "paper":
         return preprocess_paper(args)
 
-    pickle_dir = current_dir / pickle_dir_name(args.alpha, args.label_ratio)
+    pickle_dir = current_dir / pickle_dir_name(args.alpha, args.label_ratio, "official", args.seed)
     if os.path.isdir(pickle_dir):
         shutil.rmtree(pickle_dir)
 
